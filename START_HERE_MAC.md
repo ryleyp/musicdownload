@@ -526,6 +526,9 @@ music-library status
 Always review the exact-match CSV and close-match Excel reports before applying
 changes.
 
+For a focused recent import, repeat `--spotify-id ID` on both `local-music`
+commands to compare and apply only those downloaded tracks.
+
 If YouTube reports a bot/automation check, start the local no-cookie provider
 with `bash start_po_token_provider.sh`, test one retry, and then use:
 

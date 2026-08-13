@@ -620,6 +620,10 @@ To also import downloads that have no existing Music match:
 python apple_music_duplicates.py --apply --import-new
 ```
 
+Repeat `--spotify-id ID` to limit either the report-only or `--apply` run to an
+exact set of downloaded Spotify tracks. This keeps a focused recent-import run
+from reconsidering the rest of the downloaded archive.
+
 The downloaded copy is imported, enabled, and added to the
 `Spotify Archive Preferred` playlist. Exactly matching older local copies are
 disabled but never deleted. Close matches in the Excel report are not changed.

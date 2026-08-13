@@ -100,6 +100,16 @@ def parse_args() -> argparse.Namespace:
             "duplicate."
         ),
     )
+    parser.add_argument(
+        "--spotify-id",
+        action="append",
+        default=[],
+        metavar="ID",
+        help=(
+            "Compare or apply only this Spotify track ID. Repeat this option "
+            "to target several downloaded tracks."
+        ),
+    )
     parser.add_argument("--limit", type=int)
     parser.add_argument("--playlist", default=DEFAULT_PLAYLIST)
     parser.add_argument(
@@ -799,12 +809,18 @@ def main() -> int:
                   AND user_deleted = 0
                   AND download_status = 'downloaded'
                   AND download_path IS NOT NULL
+            """
+            parameters: list[Any] = []
+            if args.spotify_id:
+                placeholders = ",".join("?" for _ in args.spotify_id)
+                sql += f" AND spotify_id IN ({placeholders})"
+                parameters.extend(args.spotify_id)
+            sql += """
                 ORDER BY primary_artist COLLATE NOCASE,
                          album COLLATE NOCASE,
                          disc_number,
                          track_number
             """
-            parameters: list[Any] = []
             if args.limit is not None:
                 sql += " LIMIT ?"
                 parameters.append(args.limit)

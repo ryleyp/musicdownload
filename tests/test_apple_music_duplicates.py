@@ -104,6 +104,51 @@ class AppleMusicWorkflowTests(unittest.TestCase):
         workbook = load_workbook(close_report, read_only=True)
         self.assertEqual(workbook["Close Matches"].max_row, 1)
 
+    def test_spotify_id_filter_limits_comparison_scope(self) -> None:
+        other_mp3 = self.root / "other.mp3"
+        other_mp3.write_bytes(b"test")
+        with connect_db(self.db) as connection:
+            connection.execute(
+                """
+                INSERT INTO tracks (
+                    spotify_id, title, artists, primary_artist, album,
+                    duration_ms, explicit, is_liked, match_status,
+                    download_status, download_path, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "other456", "Other Song", "Other Artist", "Other Artist",
+                    "Other Album", 180000, 0, 1, "approved_auto",
+                    "downloaded", str(other_mp3), utc_now(),
+                ),
+            )
+        report = self.root / "filtered.csv"
+        close_report = self.root / "filtered.xlsx"
+        argv = [
+            "apple_music_duplicates.py",
+            "--db", str(self.db),
+            "--report", str(report),
+            "--close-report", str(close_report),
+            "--spotify-id", "spotify123",
+        ]
+        with (
+            patch.object(apple_music_duplicates, "require_mac"),
+            patch.object(
+                apple_music_duplicates,
+                "scan_music_library",
+                return_value=self.music_tracks(),
+            ),
+            patch.object(
+                apple_music_duplicates, "mp3_duration", return_value=180.0
+            ),
+            patch.object(sys, "argv", argv),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(apple_music_duplicates.main(), 0)
+        with report.open(encoding="utf-8-sig") as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual([row["spotify_id"] for row in rows], ["spotify123"])
+
     def test_close_runtime_mismatch_is_written_to_excel_and_not_applied(
         self,
     ) -> None:
