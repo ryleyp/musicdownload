@@ -33,6 +33,7 @@ py-modules = [
   "liked_songs_playlist",
   "matching_rules",
   "music_library",
+  "music_album_artist_cleanup",
   "music_genres",
   "music_metadata",
   "music_delete_queue",

@@ -149,6 +149,8 @@ For a slower, fully guided setup, see [START_HERE_MAC.md](START_HERE_MAC.md).
 | `music-library genres --apply` | Apply reviewed genre proposals | **Yes** |
 | `music-library metadata` | Audit Spotify metadata on project imports | No |
 | `music-library metadata --apply` | Apply and verify Spotify metadata | **Yes** |
+| `music-library cleanup-hadestown` | Report inconsistent Hadestown album artists | No |
+| `music-library cleanup-hadestown --apply` | Normalize cast-album grouping with a reversible run | **Yes** |
 | `music-library delete-queue` | Audit `delete me pls` without deleting | No |
 | `music-library delete-queue --apply --confirm "delete me pls"` | Remove queued Music entries and move unique files to Trash | **Yes** |
 | `music-library history --limit 50` | Show immutable workflow history | No |
@@ -824,6 +826,30 @@ music-library metadata --restore-run RUN_ID
 Albums containing `(VINYL)` are independently protected in both Python and the
 Music AppleScript. This stage never deletes, disables, imports, or relocates a
 track or audio file.
+
+### Normalize Hadestown artist grouping
+
+If Music shows the Hadestown cast albums as several artists, create a report:
+
+```bash
+music-library cleanup-hadestown
+```
+
+Review `data/hadestown_artist_cleanup.csv`, then normalize each cast release to
+one album artist and mark it as a compilation while preserving every track's
+individual performer credits:
+
+```bash
+music-library cleanup-hadestown --apply
+```
+
+The command changes only album artist and compilation metadata. It never moves
+or deletes audio. Restore a run with:
+
+```bash
+music-library cleanup-hadestown --list-runs
+music-library cleanup-hadestown --restore-run RUN_ID
+```
 
 ## Explicit `delete me pls` queue
 

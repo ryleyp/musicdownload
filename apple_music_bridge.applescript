@@ -510,6 +510,41 @@ on trash_file(argv)
 	return "trashed"
 end trash_file
 
+on album_artist_set(argv)
+	set applied_count to 0
+	set missing_count to 0
+	set protected_vinyl_count to 0
+	tell application "Music"
+		launch
+		if (count of argv) > 1 then
+			repeat with argument_index from 2 to count of argv by 3
+				if argument_index + 2 is less than or equal to count of argv then
+					set requested_pid to item argument_index of argv
+					set requested_album_artist to item (argument_index + 1) of argv
+					set requested_compilation to my boolean_argument(item (argument_index + 2) of argv)
+					set library_matches to every track of library playlist 1 whose persistent ID is requested_pid
+					if (count of library_matches) = 0 then
+						set missing_count to missing_count + 1
+					else
+						set target_track to item 1 of library_matches
+						set target_album to album of target_track as text
+						ignoring case
+							if target_album contains "(VINYL)" then
+								set protected_vinyl_count to protected_vinyl_count + 1
+							else
+								set album artist of target_track to requested_album_artist
+								set compilation of target_track to requested_compilation
+								set applied_count to applied_count + 1
+							end if
+						end ignoring
+					end if
+				end if
+			end repeat
+		end if
+	end tell
+	return (applied_count as text) & (character id 31) & (missing_count as text) & (character id 31) & (protected_vinyl_count as text)
+end album_artist_set
+
 on restore_track(argv)
 	set preferred_pid to item 2 of argv
 	set preferred_existed_before to my boolean_argument(item 3 of argv)
@@ -585,6 +620,8 @@ on run argv
 		return my delete_library_track(argv)
 	else if command_name is "trash-file" then
 		return my trash_file(argv)
+	else if command_name is "album-artist-set" then
+		return my album_artist_set(argv)
 	else
 		error "Unknown command: " & command_name
 	end if

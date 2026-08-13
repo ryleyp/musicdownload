@@ -33,6 +33,8 @@ STAGE_SCRIPTS = {
     "liked-songs-playlist": "liked_songs_playlist.py",
     "delete-queue": "music_delete_queue.py",
     "music-delete-queue": "music_delete_queue.py",
+    "cleanup-hadestown": "music_album_artist_cleanup.py",
+    "album-artist-cleanup": "music_album_artist_cleanup.py",
     "artwork": "repair_artwork.py",
     "local-music": "apple_music_duplicates.py",
     "apple-music": "apple_music_duplicates.py",
@@ -158,6 +160,7 @@ def guide(db_path: Path) -> int:
         " 13. music-library recent --sync --match --auto-approve 95\n"
         " 14. music-library liked-playlist  # report-only ordered playlist audit\n"
         " 15. music-library delete-queue  # report-only deletion queue audit\n"
+        " 16. music-library cleanup-hadestown  # report-only artist cleanup\n"
         "\nStandalone MOV: music-library video URL --dry-run\n"
         "\nStep 8 is report-only. This guide never runs --apply."
     )

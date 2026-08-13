@@ -481,6 +481,17 @@ unique files to macOS Trash, protects shared and `(VINYL)` files, retains audit
 history, and blocks the Spotify IDs from automatic re-download. Testing never
 runs this apply command.
 
+## Optional: consolidate Hadestown artist entries
+
+```bash
+music-library cleanup-hadestown
+music-library cleanup-hadestown --apply
+```
+
+This preserves track performer credits and audio files, but gives each cast
+release one album artist and checks the compilation flag. The CSV report and
+SQLite restore run make the change reversible.
+
 ## Normal repeat workflow
 
 ```bash

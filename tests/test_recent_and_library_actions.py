@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import liked_songs_playlist
+import music_album_artist_cleanup
 import music_delete_queue
 import recent_additions
 from common import connect_db, utc_now
@@ -262,6 +263,74 @@ class DeleteQueueTests(unittest.TestCase):
         self.assertEqual(deleted, 1)
         self.assertEqual(status, "partial")
         self.assertEqual(run["status"], "partial")
+
+
+class AlbumArtistCleanupTests(unittest.TestCase):
+    def test_hadestown_cleanup_preserves_track_artist_and_normalizes_release(self) -> None:
+        rows = music_album_artist_cleanup.build_rows([{
+            "persistent_id": "PID",
+            "title": "Road to Hell",
+            "artist": "André De Shields; Hadestown Original Broadway Company",
+            "album_artist": "Hadestown",
+            "album": "Hadestown (Original Broadway Cast Recording)",
+            "compilation": False,
+        }])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(
+            rows[0]["track_artist"],
+            "André De Shields; Hadestown Original Broadway Company",
+        )
+        self.assertEqual(
+            rows[0]["new_album_artist"],
+            "Original Broadway Cast of Hadestown",
+        )
+        self.assertTrue(rows[0]["new_compilation"])
+        self.assertEqual(rows[0]["action"], "would_update")
+
+    def test_unrelated_and_vinyl_albums_are_not_changed(self) -> None:
+        rows = music_album_artist_cleanup.build_rows([
+            {
+                "persistent_id": "OTHER", "title": "Song", "artist": "Artist",
+                "album_artist": "Artist", "album": "Other", "compilation": False,
+            },
+            {
+                "persistent_id": "VINYL", "title": "Song", "artist": "Cast",
+                "album_artist": "Wrong",
+                "album": "Hadestown (Original Broadway Cast Recording) (VINYL)",
+                "compilation": False,
+            },
+        ])
+        self.assertEqual(rows, [])
+
+    def test_noop_apply_does_not_create_empty_audit_run(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "library.sqlite"
+            report = Path(directory) / "report.csv"
+            normalized = {
+                "persistent_id": "PID", "title": "Road to Hell",
+                "artist": "André De Shields",
+                "album_artist": "Original Broadway Cast of Hadestown",
+                "album": "Hadestown (Original Broadway Cast Recording)",
+                "compilation": True,
+            }
+            with (
+                patch.object(music_album_artist_cleanup, "require_mac"),
+                patch.object(
+                    music_album_artist_cleanup,
+                    "scan_music_metadata",
+                    return_value=[normalized],
+                ),
+                redirect_stdout(io.StringIO()),
+            ):
+                result = music_album_artist_cleanup.main([
+                    "--db", str(db), "--report", str(report), "--apply",
+                ])
+            with connect_db(db) as connection:
+                count = connection.execute(
+                    "SELECT COUNT(*) FROM music_album_artist_runs"
+                ).fetchone()[0]
+        self.assertEqual(result, 0)
+        self.assertEqual(count, 0)
 
 
 if __name__ == "__main__":

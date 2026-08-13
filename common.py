@@ -373,6 +373,31 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             FOREIGN KEY (run_id) REFERENCES music_delete_runs(run_id)
         );
 
+        CREATE TABLE IF NOT EXISTS music_album_artist_runs (
+            run_id TEXT PRIMARY KEY,
+            scope TEXT NOT NULL,
+            status TEXT NOT NULL,
+            planned_count INTEGER NOT NULL,
+            applied_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            completed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS music_album_artist_changes (
+            run_id TEXT NOT NULL,
+            music_persistent_id TEXT NOT NULL,
+            title TEXT,
+            album TEXT,
+            old_album_artist TEXT NOT NULL,
+            new_album_artist TEXT NOT NULL,
+            old_compilation INTEGER NOT NULL,
+            new_compilation INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            error TEXT,
+            PRIMARY KEY (run_id, music_persistent_id),
+            FOREIGN KEY (run_id) REFERENCES music_album_artist_runs(run_id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_tracks_match_status
             ON tracks(match_status);
         CREATE INDEX IF NOT EXISTS idx_tracks_is_liked
@@ -395,6 +420,8 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             ON music_metadata_changes(run_id, status);
         CREATE INDEX IF NOT EXISTS idx_music_delete_items_status
             ON music_delete_items(run_id, status);
+        CREATE INDEX IF NOT EXISTS idx_music_album_artist_changes_status
+            ON music_album_artist_changes(run_id, status);
         """
     )
     existing_columns = {
