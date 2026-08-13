@@ -415,25 +415,98 @@ music-library metadata --restore-run RUN_ID
 Unrelated tracks and `(VINYL)` albums are never changed, and no entry or file is
 deleted, disabled, imported, or moved.
 
+## Optional: download a standalone video as MOV
+
+This command does not use the Spotify catalog. It downloads a video URL with
+`yt-dlp` and converts it to a QuickTime-compatible H.264/AAC `.mov` file:
+
+```bash
+music-library video "https://www.youtube.com/watch?v=VIDEO_ID" --dry-run
+music-library video "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+The default destination is `videos/`, the default limit is 1080p, partial
+downloads resume, and completed IDs are checkpointed. Use `--max-height 0` for
+the best available resolution, `--output PATH` for a different folder, or
+`--playlist` to explicitly download all items from a playlist URL.
+
+## 14. Review only recent Spotify additions
+
+Refresh liked songs and saved albums, score recent additions, and open a focused
+30-day workbook:
+
+```bash
+music-library recent --sync --match --auto-approve 95 --open-review
+```
+
+Then preview and download only that recent cohort:
+
+```bash
+music-library recent --download --min-score 95 --download-dry-run
+music-library recent --download --min-score 95
+```
+
+Use `--days 7` or `--since YYYY-MM-DD` to change the window.
+
+## 15. Create the ordered liked-songs playlist
+
+Create the report, then build `Spotify - Liked Songs` newest-first:
+
+```bash
+music-library liked-playlist --sync
+music-library liked-playlist --apply --open-music
+```
+
+Only downloaded local entries are included. If rebuilding is necessary, the
+old playlist is retained under a backup name.
+
+## 16. Explicit deletion queue
+
+Place intentionally unwanted local files in the Music playlist `delete me pls`,
+then run the report only:
+
+```bash
+music-library delete-queue
+```
+
+After reviewing `data/music_delete_queue_report.csv`, deletion requires both
+flags:
+
+```bash
+music-library delete-queue --apply --confirm "delete me pls"
+```
+
+This removes eligible Music entries and dependent playlist references, moves
+unique files to macOS Trash, protects shared and `(VINYL)` files, retains audit
+history, and blocks the Spotify IDs from automatic re-download. Testing never
+runs this apply command.
+
 ## Normal repeat workflow
 
 ```bash
 source .venv/bin/activate
-python spotify_sync.py
-python youtube_match.py --auto-approve 95
-python import_review.py
-python download_mp3.py --min-score 95
-python apple_music_duplicates.py
-python apple_music_duplicates.py --apply --import-new
+music-library sync --include-albums
+music-library match --auto-approve 95
+music-library review
+music-library download --min-score 95 --all
+music-library local-music
+music-library local-music --apply --import-new
+music-library liked-playlist --apply
+music-library status
 ```
 
 Always review the exact-match CSV and close-match Excel reports before applying
+changes.
 
 If YouTube reports a bot/automation check, start the local no-cookie provider
-with `bash start_po_token_provider.sh`, test one retry, and then use
-`music-library download --min-score 95 --all --retry-errors
---po-token-provider --sleep-min-seconds 20 --sleep-max-seconds 30
---auth-cooldown-min-seconds 600 --auth-cooldown-max-seconds 3600
---auth-retries-per-track 3 --max-consecutive-auth-errors 12`. The downloader
-stores the cooldown in SQLite, waits it out, and requeues the affected track.
-changes.
+with `bash start_po_token_provider.sh`, test one retry, and then use:
+
+```bash
+music-library download --min-score 95 --all --retry-errors \
+  --po-token-provider --sleep-min-seconds 20 --sleep-max-seconds 30 \
+  --auth-cooldown-min-seconds 600 --auth-cooldown-max-seconds 3600 \
+  --auth-retries-per-track 3 --max-consecutive-auth-errors 12
+```
+
+The downloader stores the cooldown in SQLite, waits it out, and requeues the
+affected track.

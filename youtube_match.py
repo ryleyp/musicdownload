@@ -1008,6 +1008,7 @@ def main() -> int:
                 placeholders = ", ".join("?" for _ in args.spotify_id)
                 where = (
                     "(is_liked = 1 OR is_saved_album = 1) "
+                    "AND user_deleted = 0 "
                     f"AND spotify_id IN ({placeholders})"
                 )
                 params.extend(args.spotify_id)
@@ -1019,7 +1020,10 @@ def main() -> int:
                     statuses.append("match_error")
                 if args.retry_unmatched:
                     statuses.append("unmatched")
-                where = "(is_liked = 1 OR is_saved_album = 1)"
+                where = (
+                    "(is_liked = 1 OR is_saved_album = 1) "
+                    "AND user_deleted = 0"
+                )
                 if not args.refresh:
                     placeholders = ", ".join("?" for _ in statuses)
                     where += f" AND match_status IN ({placeholders})"

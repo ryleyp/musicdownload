@@ -62,6 +62,7 @@ def reset_scope(
 ) -> tuple[str, list[Any]]:
     where = """
         (is_liked = 1 OR is_saved_album = 1)
+        AND user_deleted = 0
         AND youtube_url IS NOT NULL
     """
     parameters: list[Any] = []

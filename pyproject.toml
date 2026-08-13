@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spotify-youtube-library-mac"
-version = "2.0.0"
-description = "Resumable Spotify metadata, YouTube matching, MP3, and Apple Music workflow"
+version = "2.1.0"
+description = "Resumable Spotify, YouTube MP3/MOV, and local Apple Music workflow"
 requires-python = ">=3.11"
 dependencies = [
   "mutagen>=1.47,<2",
@@ -25,14 +25,18 @@ py-modules = [
   "apple_music_duplicates",
   "common",
   "download_mp3",
+  "download_video",
   "failures",
   "import_review",
   "iphone_sync",
   "library_status",
+  "liked_songs_playlist",
   "matching_rules",
   "music_library",
   "music_genres",
   "music_metadata",
+  "music_delete_queue",
+  "recent_additions",
   "reset_matches",
   "spotify_sync",
   "spotify_playlists_to_music",

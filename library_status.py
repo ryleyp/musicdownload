@@ -28,26 +28,32 @@ def progress_counts(connection: Any) -> dict[str, int]:
             SUM(CASE WHEN is_liked = 1 THEN 1 ELSE 0 END) AS liked,
             SUM(CASE WHEN is_saved_album = 1 THEN 1 ELSE 0 END)
                 AS saved_album_tracks,
+            SUM(CASE WHEN user_deleted = 1 THEN 1 ELSE 0 END)
+                AS user_deleted,
             COUNT(DISTINCT CASE
                     WHEN is_saved_album = 1 THEN album_id ELSE NULL
                 END) AS saved_albums,
             SUM(CASE
                     WHEN (is_liked = 1 OR is_saved_album = 1)
+                     AND user_deleted = 0
                      AND youtube_url IS NOT NULL THEN 1
                     ELSE 0
                 END) AS matched,
             SUM(CASE
                     WHEN (is_liked = 1 OR is_saved_album = 1)
+                     AND user_deleted = 0
                      AND match_status LIKE 'approved_%' THEN 1
                     ELSE 0
                 END) AS approved,
             SUM(CASE
                     WHEN (is_liked = 1 OR is_saved_album = 1)
+                     AND user_deleted = 0
                      AND download_status = 'downloaded' THEN 1
                     ELSE 0
                 END) AS downloaded,
             SUM(CASE
                     WHEN (is_liked = 1 OR is_saved_album = 1)
+                     AND user_deleted = 0
                      AND (
                          match_status = 'match_error'
                          OR download_status = 'error'
@@ -56,16 +62,19 @@ def progress_counts(connection: Any) -> dict[str, int]:
                 END) AS failed,
             SUM(CASE
                     WHEN (is_liked = 1 OR is_saved_album = 1)
+                     AND user_deleted = 0
                      AND match_status = 'match_error'
                     THEN 1 ELSE 0
                 END) AS match_failed,
             SUM(CASE
                     WHEN (is_liked = 1 OR is_saved_album = 1)
+                     AND user_deleted = 0
                      AND download_status = 'error'
                     THEN 1 ELSE 0
                 END) AS download_failed,
             SUM(CASE
                     WHEN (is_liked = 1 OR is_saved_album = 1)
+                     AND user_deleted = 0
                      AND (
                          (match_status = 'match_error'
                           AND match_next_retry_at IS NOT NULL
@@ -81,6 +90,7 @@ def progress_counts(connection: Any) -> dict[str, int]:
                 END) AS retry_due,
             SUM(CASE
                     WHEN (is_liked = 1 OR is_saved_album = 1)
+                     AND user_deleted = 0
                      AND apple_music_status IN (
                          'preferred_download', 'imported_new'
                      )
@@ -93,6 +103,7 @@ def progress_counts(connection: Any) -> dict[str, int]:
         "synced",
         "liked",
         "saved_album_tracks",
+        "user_deleted",
         "saved_albums",
         "matched",
         "approved",
@@ -111,6 +122,7 @@ def print_progress(counts: dict[str, int]) -> None:
         ("synced", "Synced"),
         ("liked", "Liked songs"),
         ("saved_album_tracks", "Saved-album tracks"),
+        ("user_deleted", "Locally deleted/blocked"),
         ("saved_albums", "Saved albums"),
         ("matched", "Matched"),
         ("approved", "Approved"),

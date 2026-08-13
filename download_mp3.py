@@ -51,6 +51,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument(
+        "--spotify-id",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="Download only this Spotify track ID. May be repeated.",
+    )
+    parser.add_argument(
         "--batch-size",
         "--limit",
         dest="batch_size",
@@ -314,6 +321,7 @@ def select_download_tracks(
     process_all: bool,
     retry_due: bool = False,
     errors_only: bool = False,
+    spotify_ids: list[str] | tuple[str, ...] = (),
 ) -> tuple[list[Any], dict[str, tuple[float, str, str]]]:
     if min_score is None:
         where = (
@@ -329,7 +337,12 @@ def select_download_tracks(
                 OR match_status LIKE 'approved_%'
             )
         """
+    where += " AND user_deleted = 0"
     parameters: list[Any] = []
+    if spotify_ids:
+        placeholders = ", ".join("?" for _ in spotify_ids)
+        where += f" AND spotify_id IN ({placeholders})"
+        parameters.extend(spotify_ids)
     if not redownload:
         if errors_only:
             statuses = ["error"]
@@ -392,6 +405,7 @@ def print_status(connection: Any) -> dict[str, int]:
                 AS errors
         FROM tracks
         WHERE (is_liked = 1 OR is_saved_album = 1)
+          AND user_deleted = 0
           AND match_status LIKE 'approved_%'
         """
     ).fetchone()
@@ -725,6 +739,7 @@ def main() -> int:
                 process_all=args.all,
                 retry_due=args.retry_due,
                 errors_only=args.errors_only,
+                spotify_ids=args.spotify_id,
             )
             if not tracks:
                 counts = print_status(connection)
@@ -1016,6 +1031,7 @@ def main() -> int:
                     SELECT COUNT(*)
                     FROM tracks
                     WHERE (is_liked = 1 OR is_saved_album = 1)
+                      AND user_deleted = 0
                       AND match_status LIKE 'approved_%'
                       AND download_status IN ('not_downloaded', 'downloading')
                     """

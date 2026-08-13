@@ -361,6 +361,12 @@ def main(argv: list[str] | None = None) -> int:
                 (run_id,),
             ):
                 item_rows[row["spotify_playlist_id"]].append(dict(row))
+            blocked_ids = {
+                str(row["spotify_id"])
+                for row in connection.execute(
+                    "SELECT spotify_id FROM tracks WHERE user_deleted = 1"
+                )
+            }
 
         music_tracks = scan_music_library()
         music_by_spotify: dict[str, dict[str, Any]] = {}
@@ -399,6 +405,8 @@ def main(argv: list[str] | None = None) -> int:
                     status, reason = "unavailable", "unsupported_non_track_item"
                 elif not spotify_id:
                     status, reason = "unavailable", "spotify_local_or_removed_track"
+                elif str(spotify_id) in blocked_ids:
+                    status, reason = "unavailable", "user_deleted_blocked"
                 elif not music_track:
                     status, reason = "unavailable", "downloaded_music_copy_not_found"
                 else:

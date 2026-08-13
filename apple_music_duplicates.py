@@ -796,6 +796,7 @@ def main() -> int:
                 SELECT *
                 FROM tracks
                 WHERE (is_liked = 1 OR is_saved_album = 1)
+                  AND user_deleted = 0
                   AND download_status = 'downloaded'
                   AND download_path IS NOT NULL
                 ORDER BY primary_artist COLLATE NOCASE,

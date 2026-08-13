@@ -12,4 +12,5 @@ dist/
 *.egg-info/
 data/
 downloads/
+videos/
 validation*/

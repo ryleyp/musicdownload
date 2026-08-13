@@ -283,6 +283,42 @@ on playlist_append(argv)
 	return (requested_count as text) & (character id 31) & (added_count as text) & (character id 31) & (missing_count as text) & (character id 31) & (final_count as text)
 end playlist_append
 
+on playlist_rebuild(argv)
+	set playlist_name to item 2 of argv
+	set backup_name to item 3 of argv
+	set requested_count to (count of argv) - 3
+	set added_count to 0
+	set missing_count to 0
+	set backup_used to ""
+	tell application "Music"
+		launch
+		if exists user playlist playlist_name then
+			set old_playlist to user playlist playlist_name
+			set name of old_playlist to backup_name
+			set backup_used to backup_name
+		end if
+		set target_playlist to make new user playlist with properties {name:playlist_name}
+		if requested_count > 0 then
+			repeat with argument_index from 4 to count of argv
+				set requested_pid to item argument_index of argv
+				set library_matches to every track of library playlist 1 whose persistent ID is requested_pid
+				if (count of library_matches) > 0 then
+					try
+						duplicate item 1 of library_matches to target_playlist
+						set added_count to added_count + 1
+					on error
+						set missing_count to missing_count + 1
+					end try
+				else
+					set missing_count to missing_count + 1
+				end if
+			end repeat
+		end if
+		set final_count to count of every track of target_playlist
+	end tell
+	return (requested_count as text) & (character id 31) & (added_count as text) & (character id 31) & (missing_count as text) & (character id 31) & (final_count as text) & (character id 31) & backup_used
+end playlist_rebuild
+
 on genre_scan()
 	set unit_separator to character id 31
 	set record_separator to character id 30
@@ -448,6 +484,32 @@ on metadata_set(argv)
 	return (applied_count as text) & (character id 31) & (missing_count as text) & (character id 31) & (protected_vinyl_count as text)
 end metadata_set
 
+on delete_library_track(argv)
+	set requested_pid to item 2 of argv
+	tell application "Music"
+		launch
+		set library_matches to every track of library playlist 1 whose persistent ID is requested_pid
+		if (count of library_matches) = 0 then return "missing"
+		set target_track to item 1 of library_matches
+		set target_album to album of target_track as text
+		ignoring case
+			if target_album contains "(VINYL)" then return "protected_vinyl"
+		end ignoring
+		delete target_track
+	end tell
+	return "deleted"
+end delete_library_track
+
+on trash_file(argv)
+	set requested_path to item 2 of argv
+	set target_file to POSIX file requested_path
+	tell application "Finder"
+		if not (exists target_file) then return "missing"
+		delete target_file
+	end tell
+	return "trashed"
+end trash_file
+
 on restore_track(argv)
 	set preferred_pid to item 2 of argv
 	set preferred_existed_before to my boolean_argument(item 3 of argv)
@@ -509,6 +571,8 @@ on run argv
 		return my playlist_state(argv)
 	else if command_name is "playlist-append" then
 		return my playlist_append(argv)
+	else if command_name is "playlist-rebuild" then
+		return my playlist_rebuild(argv)
 	else if command_name is "genre-scan" then
 		return my genre_scan()
 	else if command_name is "genre-set" then
@@ -517,6 +581,10 @@ on run argv
 		return my metadata_scan()
 	else if command_name is "metadata-set" then
 		return my metadata_set(argv)
+	else if command_name is "delete-library-track" then
+		return my delete_library_track(argv)
+	else if command_name is "trash-file" then
+		return my trash_file(argv)
 	else
 		error "Unknown command: " & command_name
 	end if

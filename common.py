@@ -137,6 +137,7 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             added_at TEXT,
             is_liked INTEGER NOT NULL DEFAULT 1,
             is_saved_album INTEGER NOT NULL DEFAULT 0,
+            user_deleted INTEGER NOT NULL DEFAULT 0,
             youtube_url TEXT,
             youtube_video_id TEXT,
             youtube_title TEXT,
@@ -347,6 +348,31 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             FOREIGN KEY (spotify_id) REFERENCES tracks(spotify_id)
         );
 
+        CREATE TABLE IF NOT EXISTS music_delete_runs (
+            run_id TEXT PRIMARY KEY,
+            playlist_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            planned_count INTEGER NOT NULL,
+            deleted_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            completed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS music_delete_items (
+            run_id TEXT NOT NULL,
+            music_persistent_id TEXT NOT NULL,
+            spotify_id TEXT,
+            title TEXT,
+            artist TEXT,
+            album TEXT,
+            music_location TEXT,
+            download_path TEXT,
+            status TEXT NOT NULL,
+            error TEXT,
+            PRIMARY KEY (run_id, music_persistent_id),
+            FOREIGN KEY (run_id) REFERENCES music_delete_runs(run_id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_tracks_match_status
             ON tracks(match_status);
         CREATE INDEX IF NOT EXISTS idx_tracks_is_liked
@@ -367,6 +393,8 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             ON music_genre_changes(run_id, status);
         CREATE INDEX IF NOT EXISTS idx_music_metadata_changes_status
             ON music_metadata_changes(run_id, status);
+        CREATE INDEX IF NOT EXISTS idx_music_delete_items_status
+            ON music_delete_items(run_id, status);
         """
     )
     existing_columns = {
@@ -401,6 +429,10 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
         "is_saved_album": (
             "ALTER TABLE tracks ADD COLUMN "
             "is_saved_album INTEGER NOT NULL DEFAULT 0"
+        ),
+        "user_deleted": (
+            "ALTER TABLE tracks ADD COLUMN "
+            "user_deleted INTEGER NOT NULL DEFAULT 0"
         ),
         "youtube_score_version": (
             "ALTER TABLE tracks ADD COLUMN "
@@ -439,6 +471,10 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_tracks_is_saved_album "
         "ON tracks(is_saved_album)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tracks_user_deleted "
+        "ON tracks(user_deleted)"
     )
     candidate_columns = {
         row[1]
@@ -742,6 +778,7 @@ TRACK_EXPORT_COLUMNS = [
     "manual_youtube_url",
     "match_status",
     "library_source",
+    "local_deleted_blocked",
     "confidence",
     "title",
     "artists",
@@ -816,6 +853,7 @@ def track_export_rows(connection: sqlite3.Connection) -> list[dict[str, Any]]:
                     )
                     if included
                 ),
+                "local_deleted_blocked": "Yes" if row["user_deleted"] else "No",
                 "confidence": confidence,
                 "title": row["title"],
                 "artists": row["artists"],

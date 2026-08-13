@@ -27,17 +27,28 @@ without beginning again.
 - Make runtime a hard approval gate, not merely a small scoring bonus.
 - Download approved matches as album-organized, Spotify-tagged MP3 files with
   track/disc numbers, ISRC, source IDs, explicit status, and album artwork.
+- Download standalone videos with `yt-dlp` and convert them to QuickTime MOV
+  files using H.264 video and AAC audio.
 - Resume batches and retry failed tracks without blocking the remaining queue.
+- Review only recent Spotify additions, score them, and download only that
+  focused cohort.
 - Compare downloaded MP3s with local files in Music and prefer the downloaded
   copy for exact or explicitly allowed close matches.
 - Recreate Spotify playlists using only downloaded tracks already in Music.
+- Build `Spotify - Liked Songs` in Spotify's exact newest-first order.
 - Prepare an additive-only Music playlist for manual iPhone sync in Finder.
 - Audit/apply genres and Spotify metadata with reversible change records.
+- Use an explicitly confirmed `delete me pls` queue to remove Music entries,
+  move unique files to macOS Trash, and block automatic re-download.
 
 ## Safety guarantees
 
 - Report-only is the default for every Music-library operation.
-- No command permanently deletes a Music entry or audio file.
+- Normal sync, match, download, replacement, playlist, genre, and metadata
+  commands never delete a Music entry or audio file.
+- The separately named deletion queue is report-only unless both `--apply` and
+  an exact `--confirm` value are supplied. It removes queued Music entries but
+  moves unique files to macOS Trash rather than permanently erasing them.
 - Existing downloaded files, database history, review sheets, and Spotify
   tokens are preserved across resumable runs.
 - Albums containing `(VINYL)` are protected from Music replacement and metadata
@@ -45,7 +56,7 @@ without beginning again.
 - Older duplicate entries are disabled, never deleted, when an exact downloaded
   replacement is explicitly applied.
 - Apply operations write restoration plans or reversible before-state records.
-- `.env`, `data/`, `downloads/`, virtual environments, and generated dependency
+- `.env`, `data/`, `downloads/`, `videos/`, virtual environments, and generated dependency
   trees are excluded from Git.
 
 ## Requirements
@@ -122,16 +133,24 @@ For a slower, fully guided setup, see [START_HERE_MAC.md](START_HERE_MAC.md).
 | `music-library match --auto-approve 95` | Search, score, and approve high-confidence sources | No |
 | `music-library review` | Import decisions from the review workbook | No |
 | `music-library download --min-score 95 --all` | Download and tag every eligible match | No |
+| `music-library video URL` | Download a standalone video and convert it to MOV | No |
+| `music-library recent` | Report recent liked/saved-album additions | No |
+| `music-library recent --match` | Score recent additions needing matches | No |
+| `music-library recent --download` | Download only eligible recent additions | No |
 | `music-library local-music` | Report local Music duplicates and close matches | No |
 | `music-library local-music --apply --import-new` | Prefer approved MP3s and import new files | **Yes** |
 | `music-library playlists --sync` | Snapshot Spotify playlists and create a report | No |
 | `music-library playlists --apply` | Create/resume Spotify-named Music playlists | **Yes** |
+| `music-library liked-playlist` | Report the newest-first liked-song playlist | No |
+| `music-library liked-playlist --apply` | Rebuild the exact-order liked playlist; retain the old one as backup | **Yes** |
 | `music-library iphone` | Build an iPhone sync manifest | No |
 | `music-library iphone --apply --open-finder` | Create/update the additive-only sync playlist | **Yes** |
 | `music-library genres` | Audit missing Music genres | No |
 | `music-library genres --apply` | Apply reviewed genre proposals | **Yes** |
 | `music-library metadata` | Audit Spotify metadata on project imports | No |
 | `music-library metadata --apply` | Apply and verify Spotify metadata | **Yes** |
+| `music-library delete-queue` | Audit `delete me pls` without deleting | No |
+| `music-library delete-queue --apply --confirm "delete me pls"` | Remove queued Music entries and move unique files to Trash | **Yes** |
 | `music-library history --limit 50` | Show immutable workflow history | No |
 
 ## How YouTube matching works
@@ -425,6 +444,59 @@ The resulting MP3 runtime is independently read and compared with Spotify
 before tagging or completion. A difference over 5 seconds is classified as a
 non-automatic-retry runtime failure.
 
+## Download videos as MOV files
+
+The video command is separate from Spotify matching and MP3 downloads. It can
+download any URL supported by `yt-dlp`, then uses FFmpeg to create a broadly
+QuickTime-compatible `.mov` containing H.264 video, AAC audio, `yuv420p` pixel
+format, and fast-start metadata.
+
+Preview the exact command first:
+
+```bash
+music-library video "https://www.youtube.com/watch?v=VIDEO_ID" --dry-run
+```
+
+Download and convert at up to 1080p:
+
+```bash
+music-library video "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+Files are saved under `videos/` using the video title and source ID. Partial
+downloads are resumed automatically. Completed source IDs are checkpointed in
+`data/video_download_archive.txt`, so repeating the command safely skips a
+finished video.
+
+Useful options:
+
+```bash
+# Download several URLs; a failure does not block later URLs.
+music-library video "URL_1" "URL_2" "URL_3"
+
+# Limit resolution or use the best available resolution.
+music-library video "URL" --max-height 720
+music-library video "URL" --max-height 0
+
+# Choose another destination.
+music-library video "URL" --output "/Users/yourname/Movies/YouTube"
+
+# Explicitly allow a playlist URL to expand.
+music-library video "PLAYLIST_URL" --playlist
+
+# Keep the original pre-conversion download too.
+music-library video "URL" --keep-source
+
+# Ignore the completion archive and replace an existing result.
+music-library video "URL" --redownload
+```
+
+Conversion defaults to CRF 20, the `medium` H.264 preset, and 192 kbps AAC.
+Advanced users can adjust these with `--crf`, `--preset`, and
+`--audio-bitrate`. MOV conversion re-encodes the video for compatibility, so it
+can take approximately the video's runtime on slower Macs. Playlist expansion
+is disabled unless `--playlist` is supplied.
+
 ## Main command, audit history, and structured logs
 
 The original scripts remain available. The optional main entry point forwards
@@ -467,16 +539,52 @@ MP3 compatibility.
 
 ## Updating later
 
-Run these commands whenever you want to add newly liked songs:
+Run these commands whenever you want to add newly liked songs or saved albums:
 
 ```bash
 source .venv/bin/activate
-python spotify_sync.py
-python youtube_match.py
+music-library sync --include-albums
+music-library match --auto-approve 95
+music-library download --min-score 95 --all
 ```
 
 Review, import, and download as described above. Already downloaded tracks are
 skipped.
+
+### Review and process only recent additions
+
+Create focused CSV and Excel reports for songs liked—or albums saved—during
+the last 30 days:
+
+```bash
+music-library recent
+```
+
+The reports are `data/recent_spotify_additions.csv` and
+`data/recent_spotify_additions.xlsx`. They show liked/saved-album membership,
+Spotify added time, current YouTube score/status, Spotify and YouTube runtimes,
+the runtime difference, and download state.
+
+Refresh Spotify liked songs and saved albums, then score only recent tracks
+that still need a match:
+
+```bash
+music-library recent --sync --match --auto-approve 95 --open-review
+```
+
+After reviewing the focused workbook, preview and download only that recent
+cohort:
+
+```bash
+music-library recent --download --min-score 95 --download-dry-run
+music-library recent --download --min-score 95
+```
+
+Choose another window with `--days 7` or an exact start date with
+`--since 2026-08-01`. Use `--refresh` with `--match` only when existing recent
+matches should be searched again. Failed tracks remain checkpointed; add
+`--retry-errors` when ready to retry them. Locally deleted and blocked Spotify
+IDs are excluded.
 
 ## Local Mac Music-library duplicate preference
 
@@ -528,7 +636,9 @@ a Music library entry or audio file.
 The local Music-library comparison is always report-only unless you explicitly
 add `--apply`.
 `osacompile` validates the helper before any library scan or apply operation.
-No code path permanently deletes a Music entry or audio file.
+No duplicate-comparison code path permanently deletes a Music entry or audio
+file. The separately documented deletion queue is the only feature allowed to
+remove a Music entry.
 
 ## Prepare local music for an iPhone
 
@@ -612,6 +722,28 @@ added. Unavailable, podcast, Spotify-local, and not-yet-downloaded items remain
 in the CSV report. Each `--sync` creates a new immutable SQLite snapshot rather
 than overwriting earlier playlist history.
 
+### Create a newest-first liked-songs playlist
+
+Spotify liked songs are not exposed as an ordinary Spotify playlist. This
+command uses the liked-song `added_at` order stored by the regular sync and
+matches it to project-imported Music entries:
+
+```bash
+music-library liked-playlist --sync
+```
+
+Review `data/spotify_liked_songs_music_report.csv`, then create the playlist:
+
+```bash
+music-library liked-playlist --apply --open-music
+```
+
+The target is named `Spotify - Liked Songs`. Only downloaded tracks already in
+Music are included, newest liked first. When the desired order changes, the
+previous playlist is retained under a unique backup name and a fresh exact-order
+playlist is built. No library track or audio file is removed. Use `--name` to
+choose another target name.
+
 ## Audit and apply Music genres
 
 Scan every local file track and create a report without changing Music:
@@ -692,6 +824,42 @@ music-library metadata --restore-run RUN_ID
 Albums containing `(VINYL)` are independently protected in both Python and the
 Music AppleScript. This stage never deletes, disables, imports, or relocates a
 track or audio file.
+
+## Explicit `delete me pls` queue
+
+Add local file tracks you intentionally want removed to a Music playlist named
+exactly `delete me pls`. Always create the report first:
+
+```bash
+music-library delete-queue
+```
+
+Review `data/music_delete_queue_report.csv`. It distinguishes eligible local
+files, cloud/non-file entries, shared files, and protected `(VINYL)` albums.
+Report mode does not alter Music or the filesystem.
+
+Apply only with the exact second confirmation:
+
+```bash
+music-library delete-queue --apply --confirm "delete me pls"
+```
+
+For eligible entries, Music removes the library entry, which also removes its
+references from dependent Music playlists. Unique Music/download files are
+moved to macOS Trash, never permanently erased by this command. Shared files
+are preserved. SQLite history is retained, and project-imported Spotify IDs are
+marked locally deleted so matching, downloads, duplicate replacement, and
+playlist recreation do not bring them back after the next Spotify sync.
+
+Audit runs or explicitly allow a Spotify ID again:
+
+```bash
+music-library delete-queue --list-runs
+music-library delete-queue --unblock SPOTIFY_ID
+```
+
+Unblocking does not restore the Music entry or file automatically; recover a
+trashed file through Finder first if wanted. The tool never empties Trash.
 
 ### Environment or dependency errors
 

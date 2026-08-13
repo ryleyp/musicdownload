@@ -25,6 +25,14 @@ STAGE_SCRIPTS = {
     "match": "youtube_match.py",
     "review": "import_review.py",
     "download": "download_mp3.py",
+    "video": "download_video.py",
+    "video-download": "download_video.py",
+    "recent": "recent_additions.py",
+    "recent-additions": "recent_additions.py",
+    "liked-playlist": "liked_songs_playlist.py",
+    "liked-songs-playlist": "liked_songs_playlist.py",
+    "delete-queue": "music_delete_queue.py",
+    "music-delete-queue": "music_delete_queue.py",
     "artwork": "repair_artwork.py",
     "local-music": "apple_music_duplicates.py",
     "apple-music": "apple_music_duplicates.py",
@@ -41,6 +49,17 @@ STAGE_SCRIPTS = {
 
 
 def parse_args() -> tuple[argparse.Namespace, list[str]]:
+    raw_args = sys.argv[1:]
+    stage_help = bool(
+        raw_args
+        and raw_args[0] in STAGE_SCRIPTS
+        and any(value in {"-h", "--help"} for value in raw_args[1:])
+    )
+    if stage_help:
+        raw_args = [
+            value for index, value in enumerate(raw_args)
+            if index == 0 or value not in {"-h", "--help"}
+        ]
     parser = argparse.ArgumentParser(
         description="Guide or run each Spotify library archive stage."
     )
@@ -49,7 +68,10 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         choices=(*STAGE_SCRIPTS, "status", "history", "guide", "doctor"),
     )
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
-    return parser.parse_known_args()
+    args, forwarded = parser.parse_known_args(raw_args)
+    if stage_help:
+        forwarded.append("--help")
+    return args, forwarded
 
 
 def doctor() -> int:
@@ -133,6 +155,10 @@ def guide(db_path: Path) -> int:
         " 10. music-library playlists --sync  # report-only Spotify playlists\n"
         " 11. music-library genres  # report-only local genre audit\n"
         " 12. music-library metadata  # report-only imported-track metadata audit\n"
+        " 13. music-library recent --sync --match --auto-approve 95\n"
+        " 14. music-library liked-playlist  # report-only ordered playlist audit\n"
+        " 15. music-library delete-queue  # report-only deletion queue audit\n"
+        "\nStandalone MOV: music-library video URL --dry-run\n"
         "\nStep 8 is report-only. This guide never runs --apply."
     )
     return 0
