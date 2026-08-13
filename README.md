@@ -153,6 +153,7 @@ For a slower, fully guided setup, see [START_HERE_MAC.md](START_HERE_MAC.md).
 | `music-library cleanup-hadestown --apply` | Normalize cast-album grouping with a reversible run | **Yes** |
 | `music-library cleanup-library-artists` | Audit all high-confidence album grouping splits | No |
 | `music-library cleanup-library-artists --apply` | Normalize reviewed grouping splits with a reversible run | **Yes** |
+| `music-library audit-library-artists` | Create an explainable full-library review queue and track detail data | No |
 | `music-library delete-queue` | Audit `delete me pls` without deleting | No |
 | `music-library delete-queue --apply --confirm "delete me pls"` | Remove queued Music entries and move unique files to Trash | **Yes** |
 | `music-library history --limit 50` | Show immutable workflow history | No |
@@ -865,6 +866,18 @@ variants, multiple runtime-matching copies within one release, and clear
 artist-versus-`Various Artists` compilation splits. Ambiguous same-named covers
 remain unchanged. Review `data/music_library_consistency_cleanup.csv`; restore
 with `music-library cleanup-library-artists --restore-run RUN_ID`.
+
+Create a broader review queue—including ambiguous cases that are intentionally
+excluded from automatic cleanup—with:
+
+```bash
+music-library audit-library-artists
+```
+
+It writes a group summary and track-level detail CSV. Each group includes a
+decision tier, evidence score, issue types, duplicate/runtime evidence,
+suggested reference metadata, file formats, Spotify coverage, and blank review
+decision/notes fields. The audit is always read-only.
 
 ## Explicit `delete me pls` queue
 

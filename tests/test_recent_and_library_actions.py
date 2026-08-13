@@ -11,6 +11,7 @@ from unittest.mock import patch
 import liked_songs_playlist
 import music_album_artist_cleanup
 import music_library_consistency
+import music_library_audit
 import music_delete_queue
 import recent_additions
 from common import connect_db, utc_now
@@ -413,6 +414,48 @@ class LibraryConsistencyTests(unittest.TestCase):
                 }
         self.assertIn("music_group_cleanup_runs", tables)
         self.assertIn("music_group_cleanup_changes", tables)
+
+
+class LibraryAuditTests(unittest.TestCase):
+    def test_runtime_close_variants_include_evidence_and_track_details(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "Song", "artist": "Singer",
+             "album": "Album", "album_artist": "Artist A", "compilation": False,
+             "duration": 180.0, "enabled": True, "location": "/a.mp3", "comment": ""},
+            {"persistent_id": "2", "title": "Song", "artist": "Singer",
+             "album": "Album", "album_artist": "Artist B", "compilation": True,
+             "duration": 181.0, "enabled": True, "location": "/b.m4a", "comment": ""},
+        ]
+        summary, details = music_library_audit.analyze(tracks, {})
+        self.assertEqual(len(summary), 1)
+        self.assertEqual(summary[0]["decision"], "Manual review")
+        self.assertEqual(summary[0]["runtime_close_duplicate_count"], 1)
+        self.assertTrue(details[0]["runtime_close_duplicate"])
+        self.assertEqual({row["file_format"] for row in details}, {"mp3", "m4a"})
+
+    def test_likely_distinct_group_does_not_propose_merge_values(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "Blue", "artist": "One",
+             "album": "Blue", "album_artist": "One", "compilation": False,
+             "duration": 180.0, "enabled": True, "location": "/one.mp3", "comment": ""},
+            {"persistent_id": "2", "title": "Blue", "artist": "Two",
+             "album": "Blue", "album_artist": "Two", "compilation": False,
+             "duration": 240.0, "enabled": True, "location": "/two.mp3", "comment": ""},
+        ]
+        summary, _details = music_library_audit.analyze(tracks, {})
+        self.assertEqual(summary[0]["decision"], "Likely distinct")
+        self.assertEqual(summary[0]["suggested_album_artist"], "")
+
+    def test_equivalent_separator_variants_are_safe_to_automate(self) -> None:
+        items = [
+            {"title": "Song A", "album": "Album", "album_artist": "A/B",
+             "compilation": False, "duration": 100.0},
+            {"title": "Song B", "album": "Album", "album_artist": "A; B",
+             "compilation": False, "duration": 110.0},
+        ]
+        evidence = music_library_audit.group_evidence(items)
+        self.assertEqual(evidence["confidence"], "Safe to automate")
+        self.assertIn("equivalent artist", evidence["issue_types"])
 
 
 if __name__ == "__main__":

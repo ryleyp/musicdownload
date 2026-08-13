@@ -501,6 +501,14 @@ music-library cleanup-library-artists --apply
 
 Ambiguous same-named songs and covers remain report-only and unchanged.
 
+For a detailed manual-review queue with the exact supporting tracks:
+
+```bash
+music-library audit-library-artists
+```
+
+This audit never applies changes.
+
 ## Normal repeat workflow
 
 ```bash
