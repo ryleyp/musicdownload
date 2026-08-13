@@ -156,6 +156,8 @@ For a slower, fully guided setup, see [START_HERE_MAC.md](START_HERE_MAC.md).
 | `music-library audit-library-artists` | Create an explainable full-library review queue and track detail data | No |
 | `music-library delete-queue` | Audit `delete me pls` without deleting | No |
 | `music-library delete-queue --apply --confirm "delete me pls"` | Remove queued Music entries and move unique files to Trash | **Yes** |
+| `music-library phone-delete` | Audit the phone-synced `delete me pls` queue | No |
+| `music-library phone-delete --apply --confirm "delete me pls"` | Apply the explicitly queued phone deletions | **Yes** |
 | `music-library history --limit 50` | Show immutable workflow history | No |
 
 ## How YouTube matching works
@@ -892,6 +894,24 @@ exactly `delete me pls`. Always create the report first:
 music-library delete-queue
 ```
 
+For an iPhone-driven workflow, make this playlist visible on the phone, add
+unwanted songs to it, allow the playlist change to sync back to the Mac, and
+run the equivalent phone-oriented alias:
+
+```bash
+music-library phone-delete --create-playlist
+music-library phone-delete
+```
+
+Run `--create-playlist` once if the queue does not exist yet; it only creates
+an empty Music playlist and then writes a zero-item report.
+
+Do not treat **Remove Download** on the phone as a deletion request: it only
+frees phone storage. The tool intentionally does not infer deletion from a song
+being absent on the device, because Finder sync and storage optimization can
+also remove a local phone copy. Only explicit membership in `delete me pls` is
+actionable.
+
 Review `data/music_delete_queue_report.csv`. It distinguishes eligible local
 files, cloud/non-file entries, shared files, and protected `(VINYL)` albums.
 Report mode does not alter Music or the filesystem.
@@ -900,6 +920,7 @@ Apply only with the exact second confirmation:
 
 ```bash
 music-library delete-queue --apply --confirm "delete me pls"
+music-library phone-delete --apply --confirm "delete me pls"
 ```
 
 For eligible entries, Music removes the library entry, which also removes its

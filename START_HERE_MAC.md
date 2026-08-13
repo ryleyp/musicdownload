@@ -469,11 +469,27 @@ then run the report only:
 music-library delete-queue
 ```
 
+To drive this from the phone, sync the `delete me pls` playlist to the iPhone,
+add unwanted songs to that playlist on the phone, wait for the playlist change
+to return to the Mac, and run:
+
+```bash
+music-library phone-delete --create-playlist
+music-library phone-delete
+```
+
+The first command is safe setup: it creates an empty queue if needed and does
+not add, remove, or queue any track.
+
+This does not infer intent from **Remove Download** or from a song being absent
+on the phone; either can be a device-only storage or Finder-sync change.
+
 After reviewing `data/music_delete_queue_report.csv`, deletion requires both
 flags:
 
 ```bash
 music-library delete-queue --apply --confirm "delete me pls"
+music-library phone-delete --apply --confirm "delete me pls"
 ```
 
 This removes eligible Music entries and dependent playlist references, moves

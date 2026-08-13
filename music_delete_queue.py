@@ -38,6 +38,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
     parser.add_argument("--playlist", default=DEFAULT_PLAYLIST)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
+    parser.add_argument(
+        "--create-playlist",
+        action="store_true",
+        help=(
+            "Create the empty deletion queue in Music if it is missing. "
+            "This never queues or deletes a track."
+        ),
+    )
     parser.add_argument("--apply", action="store_true")
     parser.add_argument(
         "--confirm",
@@ -298,6 +306,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.apply and args.confirm != args.playlist:
             raise AppError(
                 f"Deletion not confirmed. Re-run with --confirm {args.playlist!r}."
+            )
+        if args.create_playlist:
+            output = run_bridge(["playlist-add", args.playlist]).strip()
+            fields = output.split("\x1f")
+            if len(fields) != 5:
+                raise AppError(
+                    f"Music returned an invalid playlist result: {output!r}"
+                )
+            print(
+                f"Deletion queue ready in Music: {args.playlist} "
+                f"({fields[4]} current entries)"
             )
         queue_ids = playlist_persistent_ids(args.playlist)
         music_tracks = scan_music_library()

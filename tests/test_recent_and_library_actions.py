@@ -12,6 +12,7 @@ import liked_songs_playlist
 import music_album_artist_cleanup
 import music_library_consistency
 import music_library_audit
+import music_library
 import music_delete_queue
 import recent_additions
 from common import connect_db, utc_now
@@ -148,6 +149,47 @@ class LikedPlaylistTests(unittest.TestCase):
 
 
 class DeleteQueueTests(unittest.TestCase):
+    def test_phone_delete_alias_uses_recoverable_delete_queue(self) -> None:
+        self.assertEqual(
+            music_library.STAGE_SCRIPTS["phone-delete"],
+            "music_delete_queue.py",
+        )
+        self.assertEqual(
+            music_library.STAGE_SCRIPTS["iphone-delete"],
+            "music_delete_queue.py",
+        )
+
+    def test_create_playlist_is_empty_and_report_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "library.sqlite"
+            report = Path(directory) / "delete-report.csv"
+            with (
+                patch.object(music_delete_queue, "require_mac"),
+                patch.object(
+                    music_delete_queue,
+                    "run_bridge",
+                    return_value="0\x1f0\x1f0\x1f0\x1f0",
+                ) as bridge,
+                patch.object(
+                    music_delete_queue,
+                    "playlist_persistent_ids",
+                    return_value=[],
+                ),
+                patch.object(
+                    music_delete_queue,
+                    "scan_music_library",
+                    return_value=[],
+                ),
+                redirect_stdout(io.StringIO()),
+            ):
+                result = music_delete_queue.main([
+                    "--db", str(db),
+                    "--report", str(report),
+                    "--create-playlist",
+                ])
+        self.assertEqual(result, 0)
+        bridge.assert_called_once_with(["playlist-add", "delete me pls"])
+
     def test_delete_plan_protects_vinyl_shared_files_and_nonlocal_items(self) -> None:
         music = [
             {
