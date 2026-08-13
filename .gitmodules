@@ -1,0 +1,3 @@
+[submodule "tools/bgutil-ytdlp-pot-provider"]
+	path = tools/bgutil-ytdlp-pot-provider
+	url = https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git

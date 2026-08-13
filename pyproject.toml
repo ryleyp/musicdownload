@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spotify-youtube-library-mac"
+version = "2.0.0"
+description = "Resumable Spotify metadata, YouTube matching, MP3, and Apple Music workflow"
+requires-python = ">=3.11"
+dependencies = [
+  "mutagen>=1.47,<2",
+  "openpyxl>=3.1,<4",
+  "requests>=2.32,<3",
+  "yt-dlp[default]",
+  "bgutil-ytdlp-pot-provider>=1.3.1,<2",
+]
+
+[project.scripts]
+music-library = "music_library_app.cli:main"
+
+[tool.setuptools]
+py-modules = [
+  "activity_log",
+  "audit_history",
+  "apple_music_duplicates",
+  "common",
+  "download_mp3",
+  "failures",
+  "import_review",
+  "iphone_sync",
+  "library_status",
+  "matching_rules",
+  "music_library",
+  "music_genres",
+  "music_metadata",
+  "reset_matches",
+  "spotify_sync",
+  "spotify_playlists_to_music",
+  "youtube_match",
+]
+
+[tool.setuptools.packages.find]
+include = ["music_library_app*"]
+
+[tool.setuptools.data-files]
+"share/spotify-youtube-library-mac" = ["apple_music_bridge.applescript"]
