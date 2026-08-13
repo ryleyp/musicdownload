@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import liked_songs_playlist
 import music_album_artist_cleanup
+import music_library_consistency
 import music_delete_queue
 import recent_additions
 from common import connect_db, utc_now
@@ -331,6 +332,87 @@ class AlbumArtistCleanupTests(unittest.TestCase):
                 ).fetchone()[0]
         self.assertEqual(result, 0)
         self.assertEqual(count, 0)
+
+
+class LibraryConsistencyTests(unittest.TestCase):
+    def test_separator_variants_are_high_confidence_and_use_spotify(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "Song", "artist": "A; B",
+             "album": "Album", "album_artist": "A/B", "compilation": False,
+             "duration": 180.0},
+            {"persistent_id": "2", "title": "Song", "artist": "A; B",
+             "album": "Album", "album_artist": "A; B", "compilation": False,
+             "duration": 180.5},
+        ]
+        rows, groups = music_library_consistency.build_plan(
+            tracks, {"album": ("Album", "A; B")}
+        )
+        self.assertEqual(groups, 1)
+        self.assertEqual({row["new_album_artist"] for row in rows}, {"A; B"})
+        self.assertEqual(sum(row["action"] == "would_update" for row in rows), 1)
+
+    def test_unrelated_same_named_single_is_not_automatic(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "Blue", "artist": "Artist One",
+             "album": "Blue", "album_artist": "Artist One", "compilation": False,
+             "duration": 180.0},
+            {"persistent_id": "2", "title": "Blue", "artist": "Artist Two",
+             "album": "Blue", "album_artist": "Artist Two", "compilation": False,
+             "duration": 240.0},
+        ]
+        rows, groups = music_library_consistency.build_plan(tracks, {})
+        self.assertEqual(groups, 0)
+        self.assertEqual(rows, [])
+
+    def test_cast_release_gets_compilation_and_preserves_track_artist(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "One", "artist": "Performer One",
+             "album": "Show (Original Cast Recording)",
+             "album_artist": "Various Artists", "compilation": True,
+             "duration": 180.0},
+            {"persistent_id": "2", "title": "Two", "artist": "Performer Two",
+             "album": "Show (Original Cast Recording)",
+             "album_artist": "Show Cast", "compilation": False,
+             "duration": 190.0},
+            {"persistent_id": "3", "title": "Three", "artist": "Performer Three",
+             "album": "Show (Original Cast Recording)",
+             "album_artist": "Various Artists", "compilation": True,
+             "duration": 200.0},
+            {"persistent_id": "4", "title": "Four", "artist": "Performer Four",
+             "album": "Show (Original Cast Recording)",
+             "album_artist": "Show Cast", "compilation": False,
+             "duration": 210.0},
+        ]
+        rows, groups = music_library_consistency.build_plan(tracks, {})
+        self.assertEqual(groups, 1)
+        self.assertEqual({row["new_album_artist"] for row in rows}, {"Show Cast"})
+        self.assertTrue(all(row["new_compilation"] for row in rows))
+        self.assertEqual(rows[0]["track_artist"], "Performer One")
+
+    def test_dominant_various_artists_is_kept_for_non_cast_compilation(self) -> None:
+        items = [
+            {"album": "Compilation", "album_artist": "Various Artists"},
+            {"album": "Compilation", "album_artist": "Various Artists"},
+            {"album": "Compilation", "album_artist": "Various Artists"},
+            {"album": "Compilation", "album_artist": "Guest Artist"},
+        ]
+        album, artist, compilation, _source = (
+            music_library_consistency.canonical_values(items, None)
+        )
+        self.assertEqual(album, "Compilation")
+        self.assertEqual(artist, "Various Artists")
+        self.assertTrue(compilation)
+
+    def test_schema_has_reversible_full_library_cleanup_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with connect_db(Path(directory) / "library.sqlite") as connection:
+                tables = {
+                    row[0] for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )
+                }
+        self.assertIn("music_group_cleanup_runs", tables)
+        self.assertIn("music_group_cleanup_changes", tables)
 
 
 if __name__ == "__main__":

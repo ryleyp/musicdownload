@@ -492,6 +492,15 @@ This preserves track performer credits and audio files, but gives each cast
 release one album artist and checks the compilation flag. The CSV report and
 SQLite restore run make the change reversible.
 
+Audit and normalize the same high-confidence grouping issue library-wide:
+
+```bash
+music-library cleanup-library-artists
+music-library cleanup-library-artists --apply
+```
+
+Ambiguous same-named songs and covers remain report-only and unchanged.
+
 ## Normal repeat workflow
 
 ```bash

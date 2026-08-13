@@ -151,6 +151,8 @@ For a slower, fully guided setup, see [START_HERE_MAC.md](START_HERE_MAC.md).
 | `music-library metadata --apply` | Apply and verify Spotify metadata | **Yes** |
 | `music-library cleanup-hadestown` | Report inconsistent Hadestown album artists | No |
 | `music-library cleanup-hadestown --apply` | Normalize cast-album grouping with a reversible run | **Yes** |
+| `music-library cleanup-library-artists` | Audit all high-confidence album grouping splits | No |
+| `music-library cleanup-library-artists --apply` | Normalize reviewed grouping splits with a reversible run | **Yes** |
 | `music-library delete-queue` | Audit `delete me pls` without deleting | No |
 | `music-library delete-queue --apply --confirm "delete me pls"` | Remove queued Music entries and move unique files to Trash | **Yes** |
 | `music-library history --limit 50` | Show immutable workflow history | No |
@@ -850,6 +852,19 @@ or deletes audio. Restore a run with:
 music-library cleanup-hadestown --list-runs
 music-library cleanup-hadestown --restore-run RUN_ID
 ```
+
+For the same audit across the entire local library:
+
+```bash
+music-library cleanup-library-artists
+music-library cleanup-library-artists --apply
+```
+
+This automatically applies only high-confidence cases: separator/capitalization
+variants, multiple runtime-matching copies within one release, and clear
+artist-versus-`Various Artists` compilation splits. Ambiguous same-named covers
+remain unchanged. Review `data/music_library_consistency_cleanup.csv`; restore
+with `music-library cleanup-library-artists --restore-run RUN_ID`.
 
 ## Explicit `delete me pls` queue
 
