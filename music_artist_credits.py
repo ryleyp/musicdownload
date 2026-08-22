@@ -25,10 +25,10 @@ DEFAULT_REPORT = PROJECT_DIR / "data" / "music_artist_credit_cleanup.csv"
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Normalize multi-artist credit strings (Laufey/Los Angeles Philharmonic, "
-            "Laufey; dodie, ...) so Music stops splitting one collaboration into "
-            "duplicate artist entries. Default is report-only; albums, files, and "
-            "solo-artist credits are never changed."
+            "Normalize artist credit variants (Laufey/Los Angeles Philharmonic vs "
+            "Laufey; Los Angeles Philharmonic, laufey vs Laufey) and mismatched "
+            "hidden sort values so Music stops splitting one artist into duplicate "
+            "entries. Default is report-only; albums and files are never changed."
         )
     )
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
@@ -118,21 +118,24 @@ def canonical_artist(
         # collapse to the project-standard "A; B" text.
         artist = "; ".join(split_credits(dominant))
         return artist, split_credits(artist)[0], "dominant Music credit variant"
+    if len(key) == 1:
+        # A solo credit's variants differ only in case, spacing, or accents,
+        # so the dominant text is safe for the name and its album artist.
+        return dominant, dominant, "dominant Music credit variant"
     # Without Spotify or variant evidence this could be a single act whose
     # name contains a separator; keep the text and skip artist promotion.
     return dominant, "", "unconfirmed credit"
 
 
 def sort_target(values: list[str], key: tuple[str, ...], artist: str) -> str:
-    distinct = set(values)
-    if len(distinct) > 1:
-        # Mixed hidden sort values split one credit into several artist
-        # entries. Blank lets Music derive one consistent sort key.
+    # Mixed hidden sort values split one credit into several artist entries;
+    # keep the dominant value so an intentional sort key survives.
+    chosen = choose_text(Counter(values))
+    if chosen and credit_parts(chosen) == key and chosen != artist:
+        # A stale echo of a replaced credit variant; blank lets Music derive
+        # the sort key from the new canonical text.
         return ""
-    only = next(iter(distinct))
-    if only and credit_parts(only) == key and only != artist:
-        return ""
-    return only
+    return chosen
 
 
 def build_plan(
@@ -142,7 +145,7 @@ def build_plan(
     groups: dict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
     for track in tracks:
         key = credit_parts(track.get("artist"))
-        if len(key) >= 2:
+        if key:
             groups[key].append(track)
     rows: list[dict[str, Any]] = []
     group_count = 0
@@ -195,7 +198,11 @@ def build_plan(
                 "action": "protected_vinyl" if protected else "would_update" if changed else "current",
             })
         group_count += int(group_changed)
-        rows.extend(group_rows)
+        # Most of the library is one solo artist per group and already
+        # consistent; reporting only credits with pending or vinyl-blocked
+        # work keeps the CSV reviewable.
+        if any(row["action"] != "current" for row in group_rows):
+            rows.extend(group_rows)
     return rows, group_count
 
 
@@ -302,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
         write_report(args.report, rows)
         changes = [row for row in rows if row["action"] == "would_update"]
         print(f"Report: {args.report}")
-        print(f"Collaboration credits needing normalization: {groups:,}")
+        print(f"Artist credits needing normalization: {groups:,}")
         print(f"Tracks needing normalization: {len(changes):,}")
         if not args.apply:
             print("Report-only: no Music metadata changed. Add --apply after review."); return 0

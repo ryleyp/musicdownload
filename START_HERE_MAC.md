@@ -525,11 +525,11 @@ music-library audit-library-artists
 
 This audit never applies changes.
 
-## Optional: merge duplicate collaboration artist entries
+## Optional: merge duplicate artist entries
 
-If a library search on the iPhone or Mac shows one collaboration repeated as
-many artist rows (for example ten `Laufey/Los Angeles Philharmonic` entries),
-audit and then merge the credit variants:
+If a library search on the iPhone or Mac shows one artist repeated as many
+rows (for example ten `Laufey/Los Angeles Philharmonic` entries), audit and
+then merge the credit variants across every artist in the library:
 
 ```bash
 music-library artist-credits
@@ -537,10 +537,11 @@ music-library artist-credits --apply
 ```
 
 This rewrites separator variants of one collaboration to a single credit,
-groups the songs under the lead artist's album artist, and clears mismatched
-hidden sort values. Single acts with a separator in their name, such as
-`AC/DC`, are never split. The CSV report and SQLite restore run make the
-change reversible.
+unifies solo name case/spacing variants, groups collaborations under the
+lead artist's album artist, and unifies mismatched hidden sort values.
+Single acts with a separator in their name, such as `AC/DC`, are never
+split, and only artists needing work appear in the report. The CSV report
+and SQLite restore run make the change reversible.
 
 ## Normal repeat workflow
 

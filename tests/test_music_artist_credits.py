@@ -88,6 +88,27 @@ class CanonicalArtistTests(unittest.TestCase):
         self.assertEqual(primary, "")
         self.assertEqual(source, "unconfirmed credit")
 
+    def test_solo_case_variants_unify_to_dominant_text(self) -> None:
+        items = [
+            music_track(artist="Laufey"),
+            music_track(persistent_id="PID2", artist="Laufey"),
+            music_track(persistent_id="PID3", artist="laufey"),
+        ]
+        artist, primary, source = canonical_artist(items, credit_parts("Laufey"), {})
+        self.assertEqual(artist, "Laufey")
+        self.assertEqual(primary, "Laufey")
+        self.assertEqual(source, "dominant Music credit variant")
+
+    def test_solo_spotify_name_is_canonical(self) -> None:
+        key = credit_parts("dodie")
+        catalog = {key: [("dodie", "dodie")] * 4}
+        artist, primary, source = canonical_artist(
+            [music_track(artist="Dodie")], key, catalog
+        )
+        self.assertEqual(artist, "dodie")
+        self.assertEqual(primary, "dodie")
+        self.assertEqual(source, "Spotify single-artist name")
+
 
 class SortTargetTests(unittest.TestCase):
     def test_uniform_sort_value_is_kept(self) -> None:
@@ -96,10 +117,12 @@ class SortTargetTests(unittest.TestCase):
             "Laufey",
         )
 
-    def test_mixed_sort_values_are_cleared(self) -> None:
+    def test_mixed_sort_values_unify_to_the_dominant_value(self) -> None:
         self.assertEqual(
-            sort_target(["Laufey", ""], LAUFEY_KEY, "Laufey; Los Angeles Philharmonic"),
-            "",
+            sort_target(
+                ["Laufey", "Laufey", ""], LAUFEY_KEY, "Laufey; Los Angeles Philharmonic"
+            ),
+            "Laufey",
         )
 
     def test_stale_credit_variant_sort_value_is_cleared(self) -> None:
@@ -114,10 +137,24 @@ class SortTargetTests(unittest.TestCase):
 
 
 class BuildPlanTests(unittest.TestCase):
-    def test_solo_artists_are_never_planned(self) -> None:
+    def test_consistent_solo_artist_produces_no_rows(self) -> None:
         rows, groups = build_plan([music_track(artist="Laufey", album_artist="Laufey")], {})
         self.assertEqual(rows, [])
         self.assertEqual(groups, 0)
+
+    def test_solo_name_variants_are_unified(self) -> None:
+        tracks = [
+            music_track(artist="Laufey", album_artist="Laufey"),
+            music_track(persistent_id="PID2", artist="Laufey", album_artist="Laufey"),
+            music_track(persistent_id="PID3", artist="laufey", album_artist="laufey"),
+        ]
+        rows, groups = build_plan(tracks, {})
+        self.assertEqual(groups, 1)
+        by_id = {row["music_persistent_id"]: row for row in rows}
+        self.assertEqual(by_id["PID3"]["action"], "would_update")
+        self.assertEqual(by_id["PID3"]["new_artist"], "Laufey")
+        self.assertEqual(by_id["PID3"]["new_album_artist"], "Laufey")
+        self.assertEqual(by_id["PID1"]["action"], "current")
 
     def test_collaboration_credit_and_album_artist_are_normalized(self) -> None:
         tracks = [
@@ -130,7 +167,7 @@ class BuildPlanTests(unittest.TestCase):
         for row in rows:
             self.assertEqual(row["new_artist"], "Laufey; Los Angeles Philharmonic")
             self.assertEqual(row["new_album_artist"], "Laufey")
-            self.assertEqual(row["new_sort_artist"], "")
+            self.assertEqual(row["new_sort_artist"], "Laufey")
             self.assertEqual(row["canonical_source"], "Spotify track credit")
 
     def test_unrelated_album_artist_is_preserved(self) -> None:
@@ -151,7 +188,7 @@ class BuildPlanTests(unittest.TestCase):
             self.assertEqual(row["new_album_artist"], "AC/DC")
             self.assertEqual(row["new_sort_artist"], "")
 
-    def test_already_consistent_group_reports_current(self) -> None:
+    def test_already_consistent_group_is_omitted_from_the_report(self) -> None:
         tracks = [
             music_track(artist="AC/DC", album_artist="AC/DC", sort_artist="AC/DC"),
             music_track(
@@ -160,7 +197,7 @@ class BuildPlanTests(unittest.TestCase):
         ]
         rows, groups = build_plan(tracks, {})
         self.assertEqual(groups, 0)
-        self.assertEqual({row["action"] for row in rows}, {"current"})
+        self.assertEqual(rows, [])
 
     def test_vinyl_albums_are_protected(self) -> None:
         rows, groups = build_plan(
