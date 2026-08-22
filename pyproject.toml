@@ -34,6 +34,7 @@ py-modules = [
   "matching_rules",
   "music_library",
   "music_album_artist_cleanup",
+  "music_artist_credits",
   "music_library_consistency",
   "music_library_audit",
   "music_genres",

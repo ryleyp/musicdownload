@@ -582,6 +582,78 @@ on album_group_set(argv)
 	return (applied_count as text) & (character id 31) & (missing_count as text) & (character id 31) & (protected_vinyl_count as text)
 end album_group_set
 
+on artist_credit_scan()
+	set unit_separator to character id 31
+	set record_separator to character id 30
+	set output_rows to {}
+	tell application "Music"
+		launch
+		set track_pids to persistent ID of every file track of library playlist 1
+		set track_names to name of every file track of library playlist 1
+		set track_artists to artist of every file track of library playlist 1
+		set track_album_artists to album artist of every file track of library playlist 1
+		set track_sort_artists to sort artist of every file track of library playlist 1
+		set track_sort_album_artists to sort album artist of every file track of library playlist 1
+		set track_albums to album of every file track of library playlist 1
+		set track_compilations to compilation of every file track of library playlist 1
+		set track_comments to comment of every file track of library playlist 1
+		repeat with track_index from 1 to count of track_pids
+			try
+				set row_fields to {my clean_field(item track_index of track_pids), my clean_field(item track_index of track_names), my clean_field(item track_index of track_artists), my clean_field(item track_index of track_album_artists), my clean_field(item track_index of track_sort_artists), my clean_field(item track_index of track_sort_album_artists), my clean_field(item track_index of track_albums), my clean_field(item track_index of track_compilations), my clean_field(item track_index of track_comments)}
+				set previous_delimiters to AppleScript's text item delimiters
+				set AppleScript's text item delimiters to unit_separator
+				set end of output_rows to row_fields as text
+				set AppleScript's text item delimiters to previous_delimiters
+			end try
+		end repeat
+	end tell
+	set previous_delimiters to AppleScript's text item delimiters
+	set AppleScript's text item delimiters to record_separator
+	set output_text to output_rows as text
+	set AppleScript's text item delimiters to previous_delimiters
+	return output_text
+end artist_credit_scan
+
+on artist_credit_set(argv)
+	set applied_count to 0
+	set missing_count to 0
+	set protected_vinyl_count to 0
+	set fields_per_track to 5
+	tell application "Music"
+		launch
+		if (count of argv) > 1 then
+			repeat with argument_index from 2 to count of argv by fields_per_track
+				if argument_index + fields_per_track - 1 is less than or equal to count of argv then
+					set requested_pid to item argument_index of argv
+					set requested_artist to item (argument_index + 1) of argv
+					set requested_album_artist to item (argument_index + 2) of argv
+					set requested_sort_artist to item (argument_index + 3) of argv
+					set requested_sort_album_artist to item (argument_index + 4) of argv
+					set library_matches to every track of library playlist 1 whose persistent ID is requested_pid
+					if (count of library_matches) = 0 then
+						set missing_count to missing_count + 1
+					else
+						set target_track to item 1 of library_matches
+						set target_album to album of target_track as text
+						ignoring case
+							if target_album contains "(VINYL)" then
+								set protected_vinyl_count to protected_vinyl_count + 1
+							else
+								set artist of target_track to requested_artist
+								set album artist of target_track to requested_album_artist
+								set sort artist of target_track to requested_sort_artist
+								set sort album artist of target_track to requested_sort_album_artist
+								set applied_count to applied_count + 1
+							end if
+						end ignoring
+					end if
+				end if
+			end repeat
+		end if
+	end tell
+	return (applied_count as text) & (character id 31) & (missing_count as text) & (character id 31) & (protected_vinyl_count as text)
+end artist_credit_set
+
 on restore_track(argv)
 	set preferred_pid to item 2 of argv
 	set preferred_existed_before to my boolean_argument(item 3 of argv)
@@ -661,6 +733,10 @@ on run argv
 		return my album_artist_set(argv)
 	else if command_name is "album-group-set" then
 		return my album_group_set(argv)
+	else if command_name is "artist-credit-scan" then
+		return my artist_credit_scan()
+	else if command_name is "artist-credit-set" then
+		return my artist_credit_set(argv)
 	else
 		error "Unknown command: " & command_name
 	end if
