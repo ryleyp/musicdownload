@@ -425,6 +425,35 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             FOREIGN KEY (run_id) REFERENCES music_group_cleanup_runs(run_id)
         );
 
+        CREATE TABLE IF NOT EXISTS music_artist_credit_runs (
+            run_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            group_count INTEGER NOT NULL,
+            planned_count INTEGER NOT NULL,
+            applied_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            completed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS music_artist_credit_changes (
+            run_id TEXT NOT NULL,
+            music_persistent_id TEXT NOT NULL,
+            title TEXT,
+            album TEXT,
+            old_artist TEXT NOT NULL,
+            new_artist TEXT NOT NULL,
+            old_album_artist TEXT NOT NULL,
+            new_album_artist TEXT NOT NULL,
+            old_sort_artist TEXT NOT NULL,
+            new_sort_artist TEXT NOT NULL,
+            old_sort_album_artist TEXT NOT NULL,
+            new_sort_album_artist TEXT NOT NULL,
+            status TEXT NOT NULL,
+            error TEXT,
+            PRIMARY KEY (run_id, music_persistent_id),
+            FOREIGN KEY (run_id) REFERENCES music_artist_credit_runs(run_id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_tracks_match_status
             ON tracks(match_status);
         CREATE INDEX IF NOT EXISTS idx_tracks_is_liked
