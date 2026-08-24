@@ -541,6 +541,69 @@ class LibraryConsistencyTests(unittest.TestCase):
             music_library_consistency.one_credit_set(["Cody Fry", "Cody Fry/Ben Rector"])
         )
 
+    def test_album_spelling_variants_alone_are_repaired(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "One", "artist": "Hurts",
+             "album": "Between The Stars", "album_artist": "Hurts",
+             "compilation": False, "duration": 180.0},
+            {"persistent_id": "2", "title": "Two", "artist": "Hurts",
+             "album": "Between The Stars ", "album_artist": "Hurts",
+             "compilation": False, "duration": 190.0},
+        ]
+        rows, groups = music_library_consistency.build_plan(tracks, {})
+        self.assertEqual(groups, 1)
+        # The canonical name never carries the stray padding back.
+        self.assertEqual({row["new_album"] for row in rows}, {"Between The Stars"})
+
+    def test_artist_respelled_across_albums_snaps_to_dominant(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "One", "artist": "System of a Down",
+             "album": "Toxicity", "album_artist": "System of a Down",
+             "compilation": False, "duration": 180.0},
+            {"persistent_id": "2", "title": "Two", "artist": "System of a Down",
+             "album": "Toxicity", "album_artist": "System of a Down",
+             "compilation": False, "duration": 190.0},
+            {"persistent_id": "3", "title": "Three", "artist": "System Of A Down",
+             "album": "Mezmerize", "album_artist": "System Of A Down",
+             "compilation": False, "duration": 200.0},
+        ]
+        rows, _groups = music_library_consistency.build_plan(tracks, {})
+        updates = [row for row in rows if row["action"] == "would_update"]
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0]["music_persistent_id"], "3")
+        self.assertEqual(updates[0]["new_album_artist"], "System of a Down")
+        self.assertEqual(updates[0]["new_album"], "Mezmerize")
+
+    def test_cross_album_respell_never_touches_vinyl(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "One", "artist": "Laufey",
+             "album": "Bewitched", "album_artist": "Laufey",
+             "compilation": False, "duration": 180.0},
+            {"persistent_id": "2", "title": "One", "artist": "LAUFEY",
+             "album": "Bewitched - The Goddess Edition (VINYL)",
+             "album_artist": "LAUFEY", "compilation": False, "duration": 180.0},
+        ]
+        rows, _groups = music_library_consistency.build_plan(tracks, {})
+        vinyl = [row for row in rows if "(VINYL)" in row["old_album"]]
+        self.assertTrue(all(row["action"] == "protected_vinyl" for row in vinyl))
+        self.assertFalse(any(
+            row["action"] == "would_update" and "(VINYL)" in row["old_album"]
+            for row in rows
+        ))
+
+    def test_different_credit_sets_never_respell_to_each_other(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "One", "artist": "AC/DC",
+             "album": "Back in Black", "album_artist": "AC/DC",
+             "compilation": False, "duration": 180.0},
+            {"persistent_id": "2", "title": "Two", "artist": "ACDC",
+             "album": "Other", "album_artist": "ACDC",
+             "compilation": False, "duration": 190.0},
+        ]
+        rows, groups = music_library_consistency.build_plan(tracks, {})
+        self.assertEqual(rows, [])
+        self.assertEqual(groups, 0)
+
     def test_schema_has_reversible_full_library_cleanup_tables(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with connect_db(Path(directory) / "library.sqlite") as connection:

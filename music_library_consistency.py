@@ -64,6 +64,16 @@ def named_credits(artists: Counter[str]) -> list[str]:
     ]
 
 
+def spelling_key(value: Any) -> str:
+    """Case- and whitespace-insensitive form that still keeps punctuation.
+
+    Unlike normalize(), "Panic! At The Disco" and "Panic At The Disco" stay
+    distinct here; only casing, unicode form, and stray whitespace collapse.
+    """
+    text = unicodedata.normalize("NFC", str(value or "")).replace("\u00a0", " ")
+    return re.sub(r"\s+", " ", text).strip().casefold()
+
+
 def one_credit_set(named: list[str]) -> bool:
     """True when every named album artist is the same credit, however spelled.
 
@@ -157,6 +167,7 @@ def high_confidence_group(items: list[dict[str, Any]]) -> tuple[bool, str]:
         or equivalent
         or mixed_compilation
         or blank_mixed
+        or len(names) > 1
     )
     reasons = []
     if close_titles:
@@ -211,6 +222,8 @@ def canonical_values(
         else:
             album_artist = choose_text(named or artists)
         source = "dominant non-generic Music album artist"
+    album = str(album).strip()
+    album_artist = str(album_artist).strip()
     combined = f"{album} {album_artist}".casefold()
     compilation = (
         normalize(album_artist) in {"various artists", "soundtrack"}
@@ -256,6 +269,44 @@ def build_plan(
                 "canonical_source": source,
                 "action": "protected_vinyl" if protected else "would_update" if changed else "current",
             })
+    # Second pass: one artist spelled several ways across otherwise-consistent
+    # albums still splits into several artist entries, so snap every minority
+    # spelling to the library-dominant one. Only casing, unicode form, and
+    # whitespace may differ -- the credit set itself never changes here.
+    handled = {row["music_persistent_id"] for row in rows}
+    spellings: dict[str, Counter[str]] = defaultdict(Counter)
+    for track in tracks:
+        value = str(track.get("album_artist") or "")
+        if value.strip() and normalize(value) not in GENERIC_ARTISTS:
+            spellings[spelling_key(value)][value] += 1
+    dominant = {
+        key: choose_text(values).strip()
+        for key, values in spellings.items()
+        if len(values) > 1
+    }
+    for track in tracks:
+        pid = str(track["persistent_id"])
+        if pid in handled:
+            continue
+        value = str(track.get("album_artist") or "")
+        target = dominant.get(spelling_key(value)) if value.strip() else None
+        if target is None or target == value:
+            continue
+        protected = "(VINYL)" in str(track.get("album") or "").upper()
+        rows.append({
+            "music_persistent_id": pid,
+            "title": str(track.get("title") or ""),
+            "track_artist": str(track.get("artist") or ""),
+            "old_album": str(track.get("album") or ""),
+            "new_album": str(track.get("album") or ""),
+            "old_album_artist": value,
+            "new_album_artist": target,
+            "old_compilation": bool(track.get("compilation")),
+            "new_compilation": bool(track.get("compilation")),
+            "reason": "album artist spelled inconsistently across albums",
+            "canonical_source": "dominant library spelling",
+            "action": "protected_vinyl" if protected else "would_update",
+        })
     return rows, group_count
 
 
