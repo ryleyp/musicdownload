@@ -51,9 +51,28 @@ def normalize(value: Any) -> str:
 
 def credit_parts(value: Any) -> tuple[str, ...]:
     return tuple(sorted({
-        normalize(part) for part in re.split(r"\s*(?:;|/|\|)\s*", str(value or ""))
+        normalize(part) for part in re.split(r"\s*(?:;|/|\||,)\s*", str(value or ""))
         if normalize(part)
     }))
+
+
+def named_credits(artists: Counter[str]) -> list[str]:
+    """Album artists that actually name someone, ignoring blanks and placeholders."""
+    return [
+        artist for artist in artists
+        if artist.strip() and normalize(artist) not in GENERIC_ARTISTS
+    ]
+
+
+def one_credit_set(named: list[str]) -> bool:
+    """True when every named album artist is the same credit, however spelled.
+
+    "A/B", "A; B" and "A,B" are one artist written three ways and should be
+    unified. "Cody Fry" and "Cody Fry/Ben Rector" are two different artists
+    that happen to share an album, and so are two unrelated singles both
+    called "Bad Guy"; neither may be merged into the other.
+    """
+    return len({credit_parts(value) for value in named}) <= 1
 
 
 def choose_text(values: Counter[str]) -> str:
@@ -104,6 +123,15 @@ def high_confidence_group(items: list[dict[str, Any]]) -> tuple[bool, str]:
     nonblank = [artist for artist in artists if artist.strip()]
     if len(nonblank) <= 1 and len(names) <= 1 and len(compilations) <= 1:
         return False, ""
+    # Only exact repeats of one artist get unified. Distinct credits are
+    # distinct artists -- a solo release and a collaboration are separate
+    # entries by design, and two unrelated singles sharing a title are separate
+    # albums. Either way there is nothing here to merge, so stop before every
+    # repair signal below. Placeholders like "Various Artists" are not credits
+    # and are left to canonical_values to weigh against the album title.
+    named = named_credits(artists)
+    if not one_credit_set(named):
+        return False, ""
     by_title: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for item in items:
         by_title[normalize(item["title"])].append(item)
@@ -122,18 +150,23 @@ def high_confidence_group(items: list[dict[str, Any]]) -> tuple[bool, str]:
         for index, first in enumerate(nonblank)
         for second in nonblank[index + 1:]
     )
-    has_generic = any(normalize(value) in GENERIC_ARTISTS for value in artists)
     mixed_compilation = len(compilations) > 1
+    blank_mixed = bool(nonblank) and any(not artist.strip() for artist in artists)
     high = bool(
         len(close_titles) >= 2
         or equivalent
-        or (mixed_compilation and has_generic and len(items) >= 4)
+        or mixed_compilation
+        or blank_mixed
     )
     reasons = []
     if close_titles:
         reasons.append(f"{len(close_titles)} runtime-close duplicate titles")
     if equivalent:
         reasons.append("equivalent artist credit variants")
+    if len({str(value) for value in named}) > 1:
+        reasons.append("album artist spelled inconsistently")
+    if blank_mixed:
+        reasons.append("blank album artist on some tracks")
     if mixed_compilation:
         reasons.append("mixed compilation flags")
     if len(names) > 1:
@@ -148,14 +181,23 @@ def canonical_values(
     names = Counter(str(item.get("album") or "") for item in items)
     artists = Counter(str(item.get("album_artist") or "") for item in items)
     album = spotify[0] if spotify else choose_text(names)
-    if spotify and normalize(spotify[1]) not in GENERIC_ARTISTS:
+    named = Counter({
+        value: count for value, count in artists.items()
+        if normalize(value) not in GENERIC_ARTISTS
+    })
+    named_values = [value for value in named if value.strip()]
+    # Spotify supplies the canonical spelling, not a new set of credits. It may
+    # rename "A/B" to "A; B", but promoting its release credit onto an album
+    # whose tracks all say "Zara Larsson" would file that album under a
+    # different artist than the one it belongs to.
+    spotify_matches_credits = bool(
+        spotify
+        and (not named_values or one_credit_set(named_values + [spotify[1]]))
+    )
+    if spotify_matches_credits and normalize(spotify[1]) not in GENERIC_ARTISTS:
         album_artist = spotify[1]
         source = "Spotify album metadata"
     else:
-        named = Counter({
-            value: count for value, count in artists.items()
-            if normalize(value) not in GENERIC_ARTISTS
-        })
         various_count = sum(
             count for value, count in artists.items()
             if normalize(value) == "various artists"

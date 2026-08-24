@@ -446,6 +446,101 @@ class LibraryConsistencyTests(unittest.TestCase):
         self.assertEqual(artist, "Various Artists")
         self.assertTrue(compilation)
 
+    def test_unrelated_albums_sharing_a_title_are_never_merged(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "Bad Guy", "artist": "AMH",
+             "album": "Bad Guy", "album_artist": "AMH", "compilation": False,
+             "duration": 180.0},
+            {"persistent_id": "2", "title": "Bad Guy", "artist": "Ankor",
+             "album": "Bad Guy", "album_artist": "Ankor", "compilation": True,
+             "duration": 200.0},
+        ]
+        rows, groups = music_library_consistency.build_plan(tracks, {})
+        self.assertEqual(groups, 0)
+        self.assertEqual(rows, [])
+
+    def test_blank_album_artist_and_mixed_compilation_are_repaired(self) -> None:
+        tracks = [
+            {"persistent_id": str(index), "title": f"Live {index}",
+             "artist": "Laufey/Los Angeles Philharmonic",
+             "album": "A Night At The Symphony",
+             "album_artist": "" if index % 2 else "Laufey/Los Angeles Philharmonic",
+             "compilation": bool(index % 2), "duration": 180.0 + index}
+            for index in range(1, 7)
+        ]
+        rows, groups = music_library_consistency.build_plan(tracks, {})
+        self.assertEqual(groups, 1)
+        self.assertEqual(
+            {row["new_album_artist"] for row in rows},
+            {"Laufey/Los Angeles Philharmonic"},
+        )
+        self.assertFalse(any(row["new_compilation"] for row in rows))
+
+    def test_comma_and_semicolon_credits_are_the_same_artist(self) -> None:
+        self.assertEqual(
+            music_library_consistency.credit_parts("Annapantsu,Caleb Hyles"),
+            music_library_consistency.credit_parts("Annapantsu; Caleb Hyles"),
+        )
+
+    def test_a_collaboration_stays_a_separate_artist_from_the_solo_credit(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "One", "artist": "Zara Larsson",
+             "album": "Midnight Sun", "album_artist": "Zara Larsson",
+             "compilation": False, "duration": 180.0},
+            {"persistent_id": "2", "title": "Two",
+             "artist": "Zara Larsson; Muni Long", "album": "Midnight Sun",
+             "album_artist": "Zara Larsson; Muni Long", "compilation": False,
+             "duration": 200.0},
+        ]
+        rows, groups = music_library_consistency.build_plan(tracks, {})
+        self.assertEqual(groups, 0)
+        self.assertEqual(rows, [])
+
+    def test_spotify_may_not_promote_a_collaboration_credit(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "One", "artist": "Zara Larsson",
+             "album": "Midnight Sun", "album_artist": "Zara Larsson",
+             "compilation": True, "duration": 180.0},
+            {"persistent_id": "2", "title": "Two", "artist": "Zara Larsson",
+             "album": "Midnight Sun", "album_artist": "Zara Larsson",
+             "compilation": False, "duration": 200.0},
+        ]
+        rows, groups = music_library_consistency.build_plan(
+            tracks, {"midnight sun": ("Midnight Sun", "Zara Larsson; Muni Long")}
+        )
+        self.assertEqual(groups, 1)
+        self.assertEqual({row["new_album_artist"] for row in rows}, {"Zara Larsson"})
+
+    def test_spotify_still_fixes_spelling_of_the_same_credit(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "One", "artist": "A/B",
+             "album": "Album", "album_artist": "A/B", "compilation": True,
+             "duration": 180.0},
+            {"persistent_id": "2", "title": "Two", "artist": "A,B",
+             "album": "Album", "album_artist": "A,B", "compilation": False,
+             "duration": 200.0},
+        ]
+        rows, groups = music_library_consistency.build_plan(
+            tracks, {"album": ("Album", "A; B")}
+        )
+        self.assertEqual(groups, 1)
+        self.assertEqual({row["new_album_artist"] for row in rows}, {"A; B"})
+
+    def test_one_credit_set_ignores_separator_and_case(self) -> None:
+        self.assertTrue(
+            music_library_consistency.one_credit_set(
+                ["Panic! At The Disco", "Panic! at the Disco"]
+            )
+        )
+        self.assertTrue(
+            music_library_consistency.one_credit_set(
+                ["Annapantsu,Caleb Hyles", "Annapantsu; Caleb Hyles"]
+            )
+        )
+        self.assertFalse(
+            music_library_consistency.one_credit_set(["Cody Fry", "Cody Fry/Ben Rector"])
+        )
+
     def test_schema_has_reversible_full_library_cleanup_tables(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with connect_db(Path(directory) / "library.sqlite") as connection:
