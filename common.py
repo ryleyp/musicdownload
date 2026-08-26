@@ -419,6 +419,8 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             new_album_artist TEXT NOT NULL,
             old_compilation INTEGER NOT NULL,
             new_compilation INTEGER NOT NULL,
+            old_track_artist TEXT NOT NULL DEFAULT '',
+            new_track_artist TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL,
             error TEXT,
             PRIMARY KEY (run_id, music_persistent_id),
@@ -524,6 +526,18 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
     for column, statement in migrations.items():
         if column not in existing_columns:
             connection.execute(statement)
+    cleanup_columns = {
+        row[1]
+        for row in connection.execute(
+            "PRAGMA table_info(music_group_cleanup_changes)"
+        ).fetchall()
+    }
+    for column in ("old_track_artist", "new_track_artist"):
+        if column not in cleanup_columns:
+            connection.execute(
+                f"ALTER TABLE music_group_cleanup_changes "
+                f"ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
+            )
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_tracks_is_saved_album "
         "ON tracks(is_saved_album)"

@@ -552,12 +552,14 @@ on album_group_set(argv)
 	tell application "Music"
 		launch
 		if (count of argv) > 1 then
-			repeat with argument_index from 2 to count of argv by 4
-				if argument_index + 3 is less than or equal to count of argv then
+			repeat with argument_index from 2 to count of argv by 5
+				if argument_index + 4 is less than or equal to count of argv then
 					set requested_pid to item argument_index of argv
 					set requested_album to item (argument_index + 1) of argv
 					set requested_album_artist to item (argument_index + 2) of argv
 					set requested_compilation to my boolean_argument(item (argument_index + 3) of argv)
+					-- Empty means "leave the track performer untouched".
+					set requested_track_artist to item (argument_index + 4) of argv
 					set library_matches to every track of library playlist 1 whose persistent ID is requested_pid
 					if (count of library_matches) = 0 then
 						set missing_count to missing_count + 1
@@ -571,6 +573,9 @@ on album_group_set(argv)
 								set album of target_track to requested_album
 								set album artist of target_track to requested_album_artist
 								set compilation of target_track to requested_compilation
+								if requested_track_artist is not "" then
+									set artist of target_track to requested_track_artist
+								end if
 								set applied_count to applied_count + 1
 							end if
 						end ignoring

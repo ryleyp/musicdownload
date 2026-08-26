@@ -126,6 +126,96 @@ def spotify_preferences(connection: Any, tracks: list[dict[str, Any]]) -> dict[s
     return output
 
 
+def spotify_sources(
+    connection: Any, tracks: list[dict[str, Any]]
+) -> dict[str, tuple[str, str]]:
+    """Map Music persistent IDs to the Spotify (album, album artist) they came from."""
+    spotify = {
+        row["spotify_id"]: row
+        for row in connection.execute(
+            "SELECT spotify_id, album, album_artist FROM tracks"
+        )
+    }
+    output: dict[str, tuple[str, str]] = {}
+    for track in tracks:
+        spotify_id = marker_spotify_id(str(track.get("comment") or ""))
+        source = spotify.get(spotify_id) if spotify_id else None
+        if source and source["album"] and source["album_artist"]:
+            output[str(track["persistent_id"])] = (
+                str(source["album"]), str(source["album_artist"])
+            )
+    return output
+
+
+def split_release(
+    items: list[dict[str, Any]],
+    spotify_by_pid: dict[str, tuple[str, str]],
+) -> tuple[bool, str, tuple[str, str] | None]:
+    """Decide whether same-title tracks under different credits are one release.
+
+    A release fragmented by tagging conventions has disjoint track titles
+    across its credit sides; different recordings of one song (covers, a
+    single next to its album) share the song's title, and unrelated albums
+    that merely share a name ("Greatest Hits") share neither titles nor
+    credits nor a Spotify source. Only the fragmented release may merge.
+    """
+    sides: dict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
+    for item in items:
+        value = str(item.get("album_artist") or "")
+        key = credit_parts(value)
+        if key and normalize(value) not in GENERIC_ARTISTS:
+            sides[key].append(item)
+    if len(sides) < 2:
+        return False, "", None
+    title_sets = [
+        {normalize(item["title"]) for item in group} for group in sides.values()
+    ]
+    for index, first in enumerate(title_sets):
+        for second in title_sets[index + 1:]:
+            if first & second:
+                return False, "", None
+    sources = {
+        spotify_by_pid[str(item["persistent_id"])]
+        for group in sides.values() for item in group
+        if str(item["persistent_id"]) in spotify_by_pid
+    }
+    album_words = set(normalize(str(items[0].get("album") or "")).split())
+
+    def within_title(side_key: tuple[str, ...]) -> bool:
+        # A side credited to the show or film itself -- "Hamilton" on
+        # "Hamilton (Original Broadway Cast Recording)" -- belongs to this
+        # album by name, even though it shares no word with the other credit.
+        words = {word for part in side_key for word in part.split()}
+        return bool(words) and words <= album_words
+
+    # More than one Spotify source is not a veto: a deluxe album often sits
+    # next to a single release of one of its tracks. It only rules out using
+    # Spotify as the canonical credit; the relation rules below still decide.
+    if len(sources) == 1:
+        source = next(iter(sources))
+        every_side_accounted = all(
+            any(str(item["persistent_id"]) in spotify_by_pid for item in group)
+            or within_title(side_key)
+            for side_key, group in sides.items()
+        )
+        if every_side_accounted:
+            return True, "every side belongs to one Spotify release", source
+    largest = max(sides, key=lambda key: len(sides[key]))
+
+    def related(first: tuple[str, ...], second: tuple[str, ...]) -> bool:
+        if set(first) <= set(second) or set(second) <= set(first):
+            return True
+        words_first = {word for part in first for word in part.split()}
+        words_second = {word for part in second for word in part.split()}
+        return bool(words_first & words_second)
+
+    if all(related(key, largest) for key in sides if key != largest):
+        return True, "same-title album split across related credits", None
+    if all(within_title(key) for key in sides):
+        return True, "same-title album split across related credits", None
+    return False, "", None
+
+
 def high_confidence_group(items: list[dict[str, Any]]) -> tuple[bool, str]:
     artists = Counter(str(item.get("album_artist") or "") for item in items)
     names = Counter(str(item.get("album") or "") for item in items)
@@ -232,10 +322,54 @@ def canonical_values(
     return album, album_artist, compilation, source
 
 
+def merged_canonical(
+    items: list[dict[str, Any]],
+    spotify_source: tuple[str, str] | None,
+) -> tuple[str, str, bool, str]:
+    if spotify_source:
+        album, album_artist = spotify_source
+        source = "Spotify album metadata"
+    else:
+        album = choose_text(Counter(str(item.get("album") or "") for item in items))
+        album_artist = choose_text(
+            Counter(str(item.get("album_artist") or "") for item in items)
+        )
+        source = "majority side of the split release"
+    album = str(album).strip()
+    album_artist = str(album_artist).strip()
+    combined = f"{album} {album_artist}".casefold()
+    compilation = (
+        normalize(album_artist) in {"various artists", "soundtrack"}
+        or any(word in combined for word in COMPILATION_WORDS)
+    )
+    return album, album_artist, compilation, source
+
+
 def build_plan(
     tracks: list[dict[str, Any]],
     spotify: dict[str, tuple[str, str]],
+    spotify_by_pid: dict[str, tuple[str, str]] | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
+    spotify_by_pid = spotify_by_pid or {}
+    # One performer spelled several ways is still one artist; every row below
+    # also snaps the performer to the library-dominant spelling of its credit.
+    performer_spellings: dict[str, Counter[str]] = defaultdict(Counter)
+    for track in tracks:
+        value = str(track.get("artist") or "")
+        if value.strip():
+            performer_spellings[spelling_key(value)][value] += 1
+    dominant_performer = {
+        key: choose_text(values).strip()
+        for key, values in performer_spellings.items()
+        if len(values) > 1
+    }
+
+    def performer_target(track: dict[str, Any]) -> str:
+        value = str(track.get("artist") or "")
+        if not value.strip():
+            return value
+        return dominant_performer.get(spelling_key(value), value) or value
+
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for track in tracks:
         if str(track.get("album") or "").strip():
@@ -244,27 +378,38 @@ def build_plan(
     group_count = 0
     for key, items in groups.items():
         high, reason = high_confidence_group(items)
+        merge_source = None
         if not high:
-            continue
+            merged, reason, merge_source = split_release(items, spotify_by_pid)
+            if not merged:
+                continue
         group_count += 1
-        album, artist, compilation, source = canonical_values(items, spotify.get(key))
+        if high:
+            album, artist, compilation, source = canonical_values(items, spotify.get(key))
+        else:
+            album, artist, compilation, source = merged_canonical(items, merge_source)
         for item in items:
             protected = "(VINYL)" in str(item.get("album") or "").upper()
+            old_performer = str(item.get("artist") or "")
+            new_performer = performer_target(item)
             changed = (
                 item.get("album") != album
                 or item.get("album_artist") != artist
                 or bool(item.get("compilation")) != compilation
+                or old_performer != new_performer
             )
             rows.append({
                 "music_persistent_id": str(item["persistent_id"]),
                 "title": str(item.get("title") or ""),
-                "track_artist": str(item.get("artist") or ""),
+                "track_artist": old_performer,
                 "old_album": str(item.get("album") or ""),
                 "new_album": album,
                 "old_album_artist": str(item.get("album_artist") or ""),
                 "new_album_artist": artist,
                 "old_compilation": bool(item.get("compilation")),
                 "new_compilation": compilation,
+                "old_track_artist": old_performer,
+                "new_track_artist": new_performer,
                 "reason": reason,
                 "canonical_source": source,
                 "action": "protected_vinyl" if protected else "would_update" if changed else "current",
@@ -290,20 +435,28 @@ def build_plan(
             continue
         value = str(track.get("album_artist") or "")
         target = dominant.get(spelling_key(value)) if value.strip() else None
-        if target is None or target == value:
+        old_performer = str(track.get("artist") or "")
+        new_performer = performer_target(track)
+        if (target is None or target == value) and old_performer == new_performer:
             continue
         protected = "(VINYL)" in str(track.get("album") or "").upper()
+        if target is None or target == value:
+            reason = "performer spelled inconsistently across the library"
+        else:
+            reason = "album artist spelled inconsistently across albums"
         rows.append({
             "music_persistent_id": pid,
             "title": str(track.get("title") or ""),
-            "track_artist": str(track.get("artist") or ""),
+            "track_artist": old_performer,
             "old_album": str(track.get("album") or ""),
             "new_album": str(track.get("album") or ""),
             "old_album_artist": value,
-            "new_album_artist": target,
+            "new_album_artist": target if target is not None else value,
             "old_compilation": bool(track.get("compilation")),
             "new_compilation": bool(track.get("compilation")),
-            "reason": "album artist spelled inconsistently across albums",
+            "old_track_artist": old_performer,
+            "new_track_artist": new_performer,
+            "reason": reason,
             "canonical_source": "dominant library spelling",
             "action": "protected_vinyl" if protected else "would_update",
         })
@@ -332,10 +485,18 @@ def set_groups(rows: list[dict[str, Any]], batch_size: int, restore: bool = Fals
         arguments = ["album-group-set"]
         for row in rows[offset:offset + batch_size]:
             prefix = "old" if restore else "new"
+            old_performer = str(row.get("old_track_artist") or "")
+            new_performer = str(row.get("new_track_artist") or "")
+            # An empty fifth field tells the bridge to leave the performer
+            # untouched; rows from before this field existed stay inert.
+            performer = ""
+            if old_performer != new_performer:
+                performer = old_performer if restore else new_performer
             arguments.extend([
                 row["music_persistent_id"], row[f"{prefix}_album"],
                 row[f"{prefix}_album_artist"],
                 "true" if row[f"{prefix}_compilation"] else "false",
+                performer,
             ])
         result = run_bridge(arguments).strip().split("\x1f")
         if len(result) != 3 or not all(value.isdigit() for value in result):
@@ -352,9 +513,15 @@ def verify(connection: Any, run_id: str, restore: bool = False) -> int:
     prefix = "old" if restore else "new"
     for change in changes:
         actual = current.get(change["music_persistent_id"])
+        keys = change.keys() if hasattr(change, "keys") else []
+        old_performer = str(change["old_track_artist"] or "") if "old_track_artist" in keys else ""
+        new_performer = str(change["new_track_artist"] or "") if "new_track_artist" in keys else ""
         ok = bool(actual and actual["album"] == change[f"{prefix}_album"]
                   and actual["album_artist"] == change[f"{prefix}_album_artist"]
                   and bool(actual["compilation"]) == bool(change[f"{prefix}_compilation"]))
+        if ok and old_performer != new_performer:
+            expected = old_performer if restore else new_performer
+            ok = str(actual["artist"] or "") == expected
         connection.execute(
             "UPDATE music_group_cleanup_changes SET status = ?, error = ? "
             "WHERE run_id = ? AND music_persistent_id = ?",
@@ -406,7 +573,8 @@ def main(argv: list[str] | None = None) -> int:
         attach_durations(metadata, scan_music_genres())
         with connect_db(args.db) as connection:
             spotify = spotify_preferences(connection, metadata)
-        rows, groups = build_plan(metadata, spotify)
+            spotify_by_pid = spotify_sources(connection, metadata)
+        rows, groups = build_plan(metadata, spotify, spotify_by_pid)
         write_report(args.report, rows)
         changes = [row for row in rows if row["action"] == "would_update"]
         print(f"Report: {args.report}")
@@ -456,12 +624,14 @@ def main(argv: list[str] | None = None) -> int:
                 connection.executemany(
                     "INSERT INTO music_group_cleanup_changes "
                     "(run_id,music_persistent_id,title,track_artist,old_album,new_album,"
-                    "old_album_artist,new_album_artist,old_compilation,new_compilation,status) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,'planned')",
+                    "old_album_artist,new_album_artist,old_compilation,new_compilation,"
+                    "old_track_artist,new_track_artist,status) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'planned')",
                     [(run_id,row["music_persistent_id"],row["title"],row["track_artist"],
                       row["old_album"],row["new_album"],row["old_album_artist"],
                       row["new_album_artist"],int(row["old_compilation"]),
-                      int(row["new_compilation"])) for row in changes],
+                      int(row["new_compilation"]),row["old_track_artist"],
+                      row["new_track_artist"]) for row in changes],
                 )
         set_groups(pending, args.batch_size)
         with connect_db(args.db) as connection:

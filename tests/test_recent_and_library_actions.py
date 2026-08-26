@@ -482,12 +482,12 @@ class LibraryConsistencyTests(unittest.TestCase):
             music_library_consistency.credit_parts("Annapantsu; Caleb Hyles"),
         )
 
-    def test_a_collaboration_stays_a_separate_artist_from_the_solo_credit(self) -> None:
+    def test_a_single_never_merges_into_the_album_that_shares_its_title(self) -> None:
         tracks = [
-            {"persistent_id": "1", "title": "One", "artist": "Zara Larsson",
+            {"persistent_id": "1", "title": "Midnight Sun", "artist": "Zara Larsson",
              "album": "Midnight Sun", "album_artist": "Zara Larsson",
              "compilation": False, "duration": 180.0},
-            {"persistent_id": "2", "title": "Two",
+            {"persistent_id": "2", "title": "Midnight Sun",
              "artist": "Zara Larsson; Muni Long", "album": "Midnight Sun",
              "album_artist": "Zara Larsson; Muni Long", "compilation": False,
              "duration": 200.0},
@@ -495,6 +495,63 @@ class LibraryConsistencyTests(unittest.TestCase):
         rows, groups = music_library_consistency.build_plan(tracks, {})
         self.assertEqual(groups, 0)
         self.assertEqual(rows, [])
+
+    def test_a_release_fragmented_across_credit_conventions_merges(self) -> None:
+        tracks = [
+            {"persistent_id": str(index), "title": f"Song {index}",
+             "artist": "Original Cast", "album": "Hamilton (Original Broadway Cast Recording)",
+             "album_artist": "Hamilton", "compilation": True, "duration": 180.0}
+            for index in range(1, 4)
+        ] + [
+            {"persistent_id": "9", "title": "Another Song", "artist": "Original Cast",
+             "album": "Hamilton (Original Broadway Cast Recording)",
+             "album_artist": "Lin-Manuel Miranda", "compilation": False,
+             "duration": 200.0},
+        ]
+        by_pid = {
+            pid: ("Hamilton (Original Broadway Cast Recording)", "Lin-Manuel Miranda")
+            for pid in ("1", "2", "3", "9")
+        }
+        rows, groups = music_library_consistency.build_plan(tracks, {}, by_pid)
+        self.assertEqual(groups, 1)
+        self.assertEqual(
+            {row["new_album_artist"] for row in rows}, {"Lin-Manuel Miranda"}
+        )
+        self.assertTrue(all(row["new_compilation"] for row in rows))
+
+    def test_unrelated_albums_sharing_a_generic_title_never_merge(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "Go Your Own Way", "artist": "Fleetwood Mac",
+             "album": "Greatest Hits", "album_artist": "Fleetwood Mac",
+             "compilation": False, "duration": 180.0},
+            {"persistent_id": "2", "title": "Pickup Man", "artist": "Joe Diffie",
+             "album": "Greatest Hits", "album_artist": "Joe Diffie",
+             "compilation": False, "duration": 200.0},
+        ]
+        by_pid = {"1": ("Greatest Hits", "Fleetwood Mac"),
+                  "2": ("Greatest Hits", "Joe Diffie")}
+        rows, groups = music_library_consistency.build_plan(tracks, {}, by_pid)
+        self.assertEqual(groups, 0)
+        self.assertEqual(rows, [])
+
+    def test_performer_respellings_snap_to_dominant(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "One", "artist": "System of a Down",
+             "album": "Toxicity", "album_artist": "System of a Down",
+             "compilation": False, "duration": 180.0},
+            {"persistent_id": "2", "title": "Two", "artist": "System of a Down",
+             "album": "Toxicity", "album_artist": "System of a Down",
+             "compilation": False, "duration": 190.0},
+            {"persistent_id": "3", "title": "Three", "artist": "System Of A Down",
+             "album": "Toxicity", "album_artist": "System of a Down",
+             "compilation": False, "duration": 200.0},
+        ]
+        rows, _groups = music_library_consistency.build_plan(tracks, {})
+        updates = [row for row in rows if row["action"] == "would_update"]
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0]["music_persistent_id"], "3")
+        self.assertEqual(updates[0]["new_track_artist"], "System of a Down")
+        self.assertEqual(updates[0]["new_album_artist"], "System of a Down")
 
     def test_spotify_may_not_promote_a_collaboration_credit(self) -> None:
         tracks = [
