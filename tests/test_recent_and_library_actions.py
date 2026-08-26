@@ -661,6 +661,58 @@ class LibraryConsistencyTests(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertEqual(groups, 0)
 
+    def test_album_artist_consolidates_to_primary_but_track_credit_stays(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "Dreamer (Live)",
+             "artist": "Laufey/Los Angeles Philharmonic",
+             "album": "A Night At The Symphony",
+             "album_artist": "Laufey/Los Angeles Philharmonic",
+             "compilation": False, "duration": 180.0},
+        ]
+        rows, _groups = music_library_consistency.build_plan(
+            tracks, {}, None, {"Laufey"}
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["new_album_artist"], "Laufey")
+        # The performer keeps the full collaboration credit.
+        self.assertEqual(rows[0]["new_track_artist"], "Laufey/Los Angeles Philharmonic")
+
+    def test_consolidation_never_cuts_inside_a_name_with_separators(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "Golden",
+             "artist": "HUNTR/X/EJAE", "album": "KPop Demon Hunters",
+             "album_artist": "HUNTR/X/EJAE", "compilation": False,
+             "duration": 180.0},
+        ]
+        rows, _groups = music_library_consistency.build_plan(
+            tracks, {}, None, {"HUNTR/X"}
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["new_album_artist"], "HUNTR/X")
+        # Without a confirmed prefix nothing is guessed at.
+        rows, _groups = music_library_consistency.build_plan(
+            tracks, {}, None, {"Some Other Artist"}
+        )
+        self.assertEqual(rows, [])
+
+    def test_canonical_credits_are_consolidated_too(self) -> None:
+        tracks = [
+            {"persistent_id": "1", "title": "One", "artist": "Lady Gaga; Bruno Mars",
+             "album": "Die With A Smile", "album_artist": "Lady Gaga; Bruno Mars",
+             "compilation": True, "duration": 180.0},
+            {"persistent_id": "2", "title": "One", "artist": "Lady Gaga; Bruno Mars",
+             "album": "Die With A Smile", "album_artist": "Lady Gaga; Bruno Mars",
+             "compilation": False, "duration": 180.4},
+        ]
+        rows, groups = music_library_consistency.build_plan(
+            tracks, {}, None, {"Lady Gaga"}
+        )
+        self.assertEqual(groups, 1)
+        self.assertEqual({row["new_album_artist"] for row in rows}, {"Lady Gaga"})
+        self.assertEqual(
+            {row["new_track_artist"] for row in rows}, {"Lady Gaga; Bruno Mars"}
+        )
+
     def test_schema_has_reversible_full_library_cleanup_tables(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with connect_db(Path(directory) / "library.sqlite") as connection:

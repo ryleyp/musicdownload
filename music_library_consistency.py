@@ -74,6 +74,69 @@ def spelling_key(value: Any) -> str:
     return re.sub(r"\s+", " ", text).strip().casefold()
 
 
+def credit_names(value: Any) -> tuple[list[str], list[str]]:
+    """Split a credit into its names and the separators between them, verbatim."""
+    parts = re.split(r"(\s*(?:;|/|\||,)\s*)", str(value or "").strip())
+    return [part for part in parts[0::2]], [part for part in parts[1::2]]
+
+
+def primary_credit(value: Any, known_artists: set[str]) -> str:
+    """Consolidate a multi-artist album credit to its primary artist.
+
+    The cut happens only at a proper prefix that is a KNOWN standalone
+    artist, longest first, so "HUNTR/X/EJAE/..." cuts to "HUNTR/X" and
+    never to "HUNTR", and "AC/DC" -- whose only proper prefix "AC" is no
+    artist -- stays whole. With no confirmed prefix the credit is returned
+    unchanged rather than guessed at.
+    """
+    raw = str(value or "").strip()
+    names, separators = credit_names(raw)
+    names = [name for name in names if name]
+    if len(names) <= 1:
+        return str(value or "")
+    known = {normalize(artist) for artist in known_artists if str(artist).strip()}
+    rebuilt = names[0]
+    prefixes = [rebuilt]
+    for name, separator in zip(names[1:], separators):
+        rebuilt = rebuilt + separator + name
+        prefixes.append(rebuilt)
+    for prefix in reversed(prefixes[:-1]):
+        if normalize(prefix) in known:
+            return prefix
+    return str(value or "")
+
+
+def known_single_artists(
+    connection: Any, tracks: list[dict[str, Any]]
+) -> set[str]:
+    """Names confirmed to be one artist: Spotify primaries plus every
+    single-name album artist already in the Music library."""
+    known = {
+        str(row["primary_artist"])
+        for row in connection.execute(
+            "SELECT DISTINCT primary_artist FROM tracks "
+            "WHERE primary_artist IS NOT NULL AND primary_artist != ''"
+        )
+    }
+    # Every element of a Spotify credit list is one artist entity. Split only
+    # on the "; " that spotify_sync joins with -- splitting on commas here
+    # would turn "Tyler, The Creator" into a bogus known artist "Tyler".
+    for row in connection.execute(
+        "SELECT DISTINCT artists FROM tracks WHERE artists IS NOT NULL"
+    ):
+        for name in str(row["artists"]).split("; "):
+            if name.strip():
+                known.add(name.strip())
+    for track in tracks:
+        value = str(track.get("album_artist") or "").strip()
+        if not value or normalize(value) in GENERIC_ARTISTS:
+            continue
+        names, _ = credit_names(value)
+        if len([name for name in names if name]) == 1:
+            known.add(value)
+    return known
+
+
 def one_credit_set(named: list[str]) -> bool:
     """True when every named album artist is the same credit, however spelled.
 
@@ -349,8 +412,10 @@ def build_plan(
     tracks: list[dict[str, Any]],
     spotify: dict[str, tuple[str, str]],
     spotify_by_pid: dict[str, tuple[str, str]] | None = None,
+    known_artists: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     spotify_by_pid = spotify_by_pid or {}
+    known_artists = known_artists or set()
     # One performer spelled several ways is still one artist; every row below
     # also snaps the performer to the library-dominant spelling of its credit.
     performer_spellings: dict[str, Counter[str]] = defaultdict(Counter)
@@ -388,6 +453,9 @@ def build_plan(
             album, artist, compilation, source = canonical_values(items, spotify.get(key))
         else:
             album, artist, compilation, source = merged_canonical(items, merge_source)
+        # Albums file under their primary artist; the full collaboration
+        # credit stays on each track's own artist field.
+        artist = primary_credit(artist, known_artists)
         for item in items:
             protected = "(VINYL)" in str(item.get("album") or "").upper()
             old_performer = str(item.get("artist") or "")
@@ -435,13 +503,20 @@ def build_plan(
             continue
         value = str(track.get("album_artist") or "")
         target = dominant.get(spelling_key(value)) if value.strip() else None
+        respelled = target if target is not None else value
+        consolidated = (
+            primary_credit(respelled, known_artists) if value.strip() else respelled
+        )
+        target = consolidated if consolidated != value else None
         old_performer = str(track.get("artist") or "")
         new_performer = performer_target(track)
-        if (target is None or target == value) and old_performer == new_performer:
+        if target is None and old_performer == new_performer:
             continue
         protected = "(VINYL)" in str(track.get("album") or "").upper()
-        if target is None or target == value:
+        if target is None:
             reason = "performer spelled inconsistently across the library"
+        elif consolidated != respelled:
+            reason = "album artist consolidated to the primary artist"
         else:
             reason = "album artist spelled inconsistently across albums"
         rows.append({
@@ -574,7 +649,8 @@ def main(argv: list[str] | None = None) -> int:
         with connect_db(args.db) as connection:
             spotify = spotify_preferences(connection, metadata)
             spotify_by_pid = spotify_sources(connection, metadata)
-        rows, groups = build_plan(metadata, spotify, spotify_by_pid)
+            known = known_single_artists(connection, metadata)
+        rows, groups = build_plan(metadata, spotify, spotify_by_pid, known)
         write_report(args.report, rows)
         changes = [row for row in rows if row["action"] == "would_update"]
         print(f"Report: {args.report}")
