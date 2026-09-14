@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import unittest
 
-from youtube_match import automatic_approval_eligible, candidate_score
+from youtube_match import (
+    automatic_approval_eligible,
+    candidate_record,
+    candidate_score,
+)
 from apple_music_duplicates import metadata_key, normalize
 
 
@@ -11,6 +15,111 @@ TRACK = {
     "primary_artist": "Kate Bush",
     "duration_ms": 300000,
 }
+
+
+CAST_TRACK = {
+    "title": "Valley of Ashes",
+    "primary_artist": "Paul Whitty",
+    "album": "The Great Gatsby - A New Musical",
+    "duration_ms": 180000,
+}
+
+# A licensed cast-album upload: YouTube generated the channel, the distributor
+# supplied no usable artist name, and the embedded credits name the performer.
+LICENSED_CAST_CANDIDATE = {
+    "title": "Valley of Ashes",
+    "channel": "Release - Topic",
+    "duration": 180,
+    "description": "Provided to YouTube by a distributor",
+    "track": "Valley of Ashes",
+    "artist": "Paul Whitty",
+    "album": "The Great Gatsby - A New Musical",
+}
+
+
+class LicensedTopicTests(unittest.TestCase):
+    """A generically named Topic channel should not sink a licensed match.
+
+    Cast recordings credit one performer on Spotify while the auto-generated
+    channel is named for the release or another cast member, so confirming the
+    artist by channel name alone fails on material that is plainly legitimate.
+    """
+
+    def test_licensed_upload_confirms_the_artist_despite_the_channel_name(self) -> None:
+        score, notes, hard_reject = candidate_score(
+            CAST_TRACK, LICENSED_CAST_CANDIDATE
+        )
+        self.assertFalse(hard_reject)
+        self.assertTrue(any("licensed metadata" in note for note in notes))
+        self.assertFalse(any("artist not confirmed" in note for note in notes))
+        eligible, reason = automatic_approval_eligible(
+            CAST_TRACK, LICENSED_CAST_CANDIDATE, score, hard_reject, 95.0
+        )
+        self.assertTrue(eligible, reason)
+
+    def test_a_topic_channel_alone_is_not_enough(self) -> None:
+        # No "provided to youtube by": not the licensed pipeline, so the
+        # generic channel name still confirms nothing.
+        candidate = dict(LICENSED_CAST_CANDIDATE, description="a fan upload")
+        _score, notes, _hard = candidate_score(CAST_TRACK, candidate)
+        self.assertTrue(any("artist not confirmed" in note for note in notes))
+
+    def test_a_licensed_upload_off_a_topic_channel_is_not_enough(self) -> None:
+        # Anyone can title a channel; only YouTube can mint a Topic channel,
+        # which is what ties this confirmation to the licensed pipeline.
+        candidate = dict(LICENSED_CAST_CANDIDATE, channel="Musicals Fan Uploads")
+        _score, notes, _hard = candidate_score(CAST_TRACK, candidate)
+        self.assertTrue(any("artist not confirmed" in note for note in notes))
+
+    def test_mismatched_embedded_credits_still_hard_reject(self) -> None:
+        candidate = dict(LICENSED_CAST_CANDIDATE, artist="Somebody Else")
+        _score, _notes, hard_reject = candidate_score(CAST_TRACK, candidate)
+        self.assertTrue(hard_reject)
+
+
+class ApprovalEvidenceTests(unittest.TestCase):
+    """The approval decision must weigh the evidence the score weighed.
+
+    Scoring runs on the hydrated candidate while approval re-derives its
+    signals from a rebuilt one, so any field the record drops is invisible to
+    approval. When that happened the two disagreed outright: the notes read
+    "artist confirmed by licensed metadata" while the track was held back for
+    "artist is not confirmed".
+    """
+
+    def test_record_carries_the_embedded_credits_forward(self) -> None:
+        hydrated = dict(
+            LICENSED_CAST_CANDIDATE, id="abc123", webpage_url="https://x/abc123"
+        )
+        record = candidate_record(CAST_TRACK, hydrated)
+        self.assertEqual(record["metadata_artist"], "Paul Whitty")
+        # Stored verbatim; the scorer normalises before matching on it.
+        self.assertIn(
+            "provided to youtube by", record["metadata_description"].lower()
+        )
+
+    def test_score_and_approval_agree_on_a_licensed_upload(self) -> None:
+        hydrated = dict(
+            LICENSED_CAST_CANDIDATE, id="abc123", webpage_url="https://x/abc123"
+        )
+        record = candidate_record(CAST_TRACK, hydrated)
+        self.assertIn("licensed metadata", record["score_notes"])
+        # Rebuilt exactly the way the matcher rebuilds it before approving.
+        rebuilt = {
+            "title": record["youtube_title"],
+            "channel": record["youtube_channel"],
+            "duration": record["youtube_duration_seconds"],
+            "channel_is_verified": record["youtube_channel_verified"],
+            "description": record["metadata_description"],
+            "artist": record["metadata_artist"],
+            "track": record["metadata_track"],
+            "album": record["metadata_album"],
+        }
+        eligible, reason = automatic_approval_eligible(
+            CAST_TRACK, rebuilt, record["score"], bool(record["hard_reject"]), 95.0
+        )
+        self.assertTrue(eligible, reason)
+        self.assertNotIn("not confirmed", reason)
 
 
 class ScoringTests(unittest.TestCase):

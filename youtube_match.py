@@ -283,10 +283,36 @@ def source_signals(
         )
     )
     description = raw_normalize(candidate.get("description"))
+    provided_to_youtube = "provided to youtube by" in description
+    metadata_artist = raw_normalize(candidate.get("artist"))
+    metadata_artist_match = bool(
+        target_artist
+        and metadata_artist
+        and (
+            target_artist in metadata_artist
+            or metadata_artist in target_artist
+        )
+    )
+    # YouTube mints "<name> - Topic" channels itself, only for catalogue
+    # delivered through a distributor -- nobody can upload to one. When the
+    # distributor supplies no usable artist name the channel is named
+    # generically ("Release - Topic"), so the name confirms nothing even
+    # though the upload is licensed. The embedded music credits still name
+    # the artist, and this scorer already trusts that field enough to hard
+    # reject on a mismatch, so it is good enough to confirm on a match.
+    # Cast recordings hit this constantly: Spotify credits one performer
+    # while the channel is named for the release or a different cast member.
+    licensed_topic = bool(
+        is_topic and provided_to_youtube and metadata_artist_match
+    )
     return {
         "artist_confirmed": (
-            artist_in_title or artist_in_channel or topic_artist_match
+            artist_in_title
+            or artist_in_channel
+            or topic_artist_match
+            or licensed_topic
         ),
+        "licensed_topic": licensed_topic,
         "artist_in_channel": artist_in_channel or topic_artist_match,
         "official_channel_match": official_channel_match or topic_artist_match,
         "artist_topic": topic_artist_match,
@@ -301,7 +327,7 @@ def source_signals(
             or contains_phrase(raw_title, "lyrics video")
         ),
         "verified_artist": verified and (artist_in_channel or topic_artist_match),
-        "provided_to_youtube": "provided to youtube by" in description,
+        "provided_to_youtube": provided_to_youtube,
     }
 
 
@@ -309,7 +335,7 @@ def source_tier(
     track: sqlite3.Row | dict[str, Any], candidate: dict[str, Any]
 ) -> int:
     signals = source_signals(track, candidate)
-    if signals["artist_topic"] or (
+    if signals["artist_topic"] or signals["licensed_topic"] or (
         signals["provided_to_youtube"] and signals["artist_in_channel"]
     ):
         return 5
@@ -362,7 +388,12 @@ def candidate_score(
     signals = source_signals(track, candidate)
     if signals["artist_confirmed"]:
         score += ARTIST_MATCH_POINTS
-        notes.append(f"artist confirmed +{ARTIST_MATCH_POINTS}")
+        label = (
+            "artist confirmed by licensed metadata"
+            if signals["licensed_topic"]
+            else "artist confirmed"
+        )
+        notes.append(f"{label} +{ARTIST_MATCH_POINTS}")
     else:
         score -= ARTIST_MISMATCH_PENALTY
         notes.append(f"artist not confirmed -{ARTIST_MISMATCH_PENALTY}")
@@ -548,6 +579,7 @@ def automatic_approval_eligible(
     signals = source_signals(track, candidate)
     trusted_source = (
         signals["artist_topic"]
+        or signals["licensed_topic"]
         or signals["verified_artist"]
         or (
             signals["official_channel_match"]
@@ -629,6 +661,14 @@ def candidate_record(
         "score_notes": "; ".join(notes),
         "hard_reject": 1 if hard_reject else 0,
         "source_tier": tier,
+        # Carried in memory only -- no column exists for these. The approval
+        # decision re-derives its signals from a rebuilt candidate, so without
+        # them it would weigh less evidence than the score did and could
+        # contradict it outright.
+        "metadata_description": candidate.get("description") or "",
+        "metadata_artist": candidate.get("artist") or "",
+        "metadata_track": candidate.get("track") or "",
+        "metadata_album": candidate.get("album") or "",
     }
 
 
@@ -830,6 +870,10 @@ def save_candidates(
             "channel": best["youtube_channel"],
             "duration": best["youtube_duration_seconds"],
             "channel_is_verified": best["youtube_channel_verified"],
+            "description": best.get("metadata_description", ""),
+            "artist": best.get("metadata_artist", ""),
+            "track": best.get("metadata_track", ""),
+            "album": best.get("metadata_album", ""),
         }
         eligible, reason = automatic_approval_eligible(
             track, candidate, best["score"], bool(best["hard_reject"]), auto_approve
@@ -934,6 +978,10 @@ def save_candidates(
             "channel": item["youtube_channel"],
             "duration": item["youtube_duration_seconds"],
             "channel_is_verified": item["youtube_channel_verified"],
+            "description": item.get("metadata_description", ""),
+            "artist": item.get("metadata_artist", ""),
+            "track": item.get("metadata_track", ""),
+            "album": item.get("metadata_album", ""),
         }
         eligible, reason = automatic_approval_eligible(
             track,
