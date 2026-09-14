@@ -451,6 +451,104 @@ class DownloadRuntimeMismatch(AppError):
         self.difference_seconds = difference_seconds
 
 
+# YouTube "Topic" uploads routinely pad a track with several seconds of digital
+# silence. That padding is real audio data, so the runtime check sees a file
+# several seconds longer than Spotify's and rejects a source that is otherwise a
+# perfect match -- the observed failures cluster at 5.1-5.6s over a 5s tolerance,
+# which is the padding, not a different recording. Trimming the pad before the
+# check compares like with like, and leaves the library without dead air.
+SILENCE_NOISE_FLOOR_DB = -50
+SILENCE_MIN_DETECT_SECONDS = 0.5
+SILENCE_MIN_TRIM_SECONDS = 1.0
+# Keep a short tail so a fade or reverb sitting under the noise floor is not
+# clipped; the goal is removing dead air, not trimming to the last loud sample.
+SILENCE_KEEP_TAIL_SECONDS = 0.25
+
+
+def probe_duration_seconds(path: Path) -> float | None:
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "csv=p=0", str(path),
+        ],
+        text=True, capture_output=True, check=False,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        return None
+
+
+def trailing_silence_start(path: Path, total: float) -> float | None:
+    """Where the final unbroken stretch of silence begins, if the file ends in one."""
+    result = subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-nostats", "-i", str(path),
+            "-af",
+            f"silencedetect=noise={SILENCE_NOISE_FLOOR_DB}dB:"
+            f"d={SILENCE_MIN_DETECT_SECONDS}",
+            "-f", "null", "-",
+        ],
+        text=True, capture_output=True, check=False,
+    )
+    if result.returncode != 0:
+        return None
+    last_start: float | None = None
+    last_end: float | None = None
+    for line in result.stderr.splitlines():
+        if "silence_start:" in line:
+            try:
+                last_start = float(line.rsplit("silence_start:", 1)[1].split("|")[0])
+            except ValueError:
+                last_start = None
+        elif "silence_end:" in line:
+            try:
+                last_end = float(line.rsplit("silence_end:", 1)[1].split("|")[0])
+            except ValueError:
+                last_end = None
+    if last_start is None:
+        return None
+    # Silence that resolves well before EOF is an interior gap, not padding.
+    if last_end is not None and last_end < total - 0.25:
+        return None
+    return last_start
+
+
+def trim_trailing_silence(path: Path) -> float | None:
+    """Drop trailing silence in place. Returns the new duration, or None if untouched.
+
+    Uses a stream copy so the audio is never re-encoded, and runs before tagging
+    so there is no metadata to lose. Any failure leaves the file exactly as it was
+    -- a padded file that still fails the runtime check is a far better outcome
+    than a corrupted one.
+    """
+    total = probe_duration_seconds(path)
+    if total is None:
+        return None
+    start = trailing_silence_start(path, total)
+    if start is None or total - start < SILENCE_MIN_TRIM_SECONDS:
+        return None
+    keep = start + SILENCE_KEEP_TAIL_SECONDS
+    if keep >= total:
+        return None
+    trimmed = path.with_name(f"{path.stem}.trimmed{path.suffix}")
+    result = subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", str(path), "-t", f"{keep:.3f}",
+            "-c", "copy", "-map_metadata", "0", str(trimmed),
+        ],
+        text=True, capture_output=True, check=False,
+    )
+    if result.returncode != 0 or not trimmed.exists():
+        trimmed.unlink(missing_ok=True)
+        return None
+    os.replace(trimmed, path)
+    return probe_duration_seconds(path)
+
+
 def validate_downloaded_runtime(
     path: Path,
     track: Any,
@@ -875,6 +973,12 @@ def main() -> int:
                             args.output / ".partial",
                             use_po_token_provider=args.po_token_provider,
                         )
+                        trimmed_to = trim_trailing_silence(temporary)
+                        if trimmed_to is not None:
+                            print(
+                                "  Trimmed trailing silence; runtime now "
+                                f"{trimmed_to:.1f}s."
+                            )
                         downloaded_runtime, downloaded_difference = (
                             validate_downloaded_runtime(temporary, track)
                         )
