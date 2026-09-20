@@ -38,6 +38,10 @@ without beginning again.
 - Build `Spotify - Liked Songs` in Spotify's exact newest-first order.
 - Prepare an additive-only Music playlist for manual iPhone sync in Finder.
 - Audit/apply genres and Spotify metadata with reversible change records.
+- Merge duplicate artist entries across the whole library—collaboration
+  separator variants (`Laufey/Los Angeles Philharmonic` shown as many
+  artists), solo name case/spacing variants, and mismatched hidden sort
+  values—with a reversible credit cleanup.
 - Use an explicitly confirmed `delete me pls` queue to remove Music entries,
   move unique files to macOS Trash, and block automatic re-download.
 
@@ -154,6 +158,8 @@ For a slower, fully guided setup, see [START_HERE_MAC.md](START_HERE_MAC.md).
 | `music-library cleanup-library-artists` | Audit all high-confidence album grouping splits | No |
 | `music-library cleanup-library-artists --apply` | Normalize reviewed grouping splits with a reversible run | **Yes** |
 | `music-library audit-library-artists` | Create an explainable full-library review queue and track detail data | No |
+| `music-library artist-credits` | Audit duplicate artist credit and sort variants library-wide | No |
+| `music-library artist-credits --apply` | Merge artist credit variants with a reversible run | **Yes** |
 | `music-library delete-queue` | Audit `delete me pls` without deleting | No |
 | `music-library delete-queue --apply --confirm "delete me pls"` | Remove queued Music entries and move unique files to Trash | **Yes** |
 | `music-library phone-delete` | Audit the phone-synced `delete me pls` queue | No |
@@ -884,6 +890,57 @@ It writes a group summary and track-level detail CSV. Each group includes a
 decision tier, evidence score, issue types, duplicate/runtime evidence,
 suggested reference metadata, file formats, Spotify coverage, and blank review
 decision/notes fields. The audit is always read-only.
+
+## Merge duplicate artist entries
+
+If the Music app on iPhone or Mac lists one artist many times—for example a
+library search that shows ten separate `Laufey/Los Angeles Philharmonic`
+artist rows—the cause is metadata variance across the tracks that share the
+credit: mixed separator styles (`Laufey/Los Angeles Philharmonic` versus
+`Laufey; Los Angeles Philharmonic`), solo name case/spacing/accent variants
+(`laufey` versus `Laufey`), album artists that repeat the credit differently
+per single, and hidden per-track sort artist values left behind by earlier
+imports. Create a report first:
+
+```bash
+music-library artist-credits
+```
+
+Review `data/music_artist_credit_cleanup.csv`, then normalize:
+
+```bash
+music-library artist-credits --apply
+```
+
+Every artist in the library is checked. For each group of tracks whose
+artist text names the same performer or set of performers, the cleanup:
+
+- rewrites each variant to one canonical credit, preferring the Spotify
+  catalog's text (`Artist; Artist` for collaborations, the catalog spelling
+  for solo names) and otherwise the dominant Music variant;
+- promotes the album artist to the primary performer (for example `Laufey`)
+  when the album artist merely repeats the full joined credit, so the songs
+  group under the lead artist while track credits keep every performer, and
+  unifies solo album-artist name variants the same way;
+- unifies mismatched hidden sort artist and sort album artist values to the
+  dominant value, clearing only stale echoes of a replaced credit, so Music
+  keeps one consistent sort key per artist.
+
+The report lists only artists that need work; consistent artists—most of the
+library—are omitted. Single-artist names that contain a separator, such as
+`AC/DC`, are recognized from the Spotify catalog and never split; without
+catalog confirmation an unvaried multi-part credit is left as-is and only
+sort-field variance is repaired.
+Albums marked `(VINYL)` are protected, audio files are never touched, and
+each apply is a verified, reversible run:
+
+```bash
+music-library artist-credits --list-runs
+music-library artist-credits --restore-run RUN_ID
+```
+
+After an apply, re-sync the iPhone (or let iCloud Music Library update) so
+the merged artist entries collapse on the phone as well.
 
 ## Explicit `delete me pls` queue
 

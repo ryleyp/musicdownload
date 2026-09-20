@@ -37,6 +37,8 @@ STAGE_SCRIPTS = {
     "iphone-delete": "music_delete_queue.py",
     "cleanup-hadestown": "music_album_artist_cleanup.py",
     "album-artist-cleanup": "music_album_artist_cleanup.py",
+    "artist-credits": "music_artist_credits.py",
+    "cleanup-artist-credits": "music_artist_credits.py",
     "cleanup-library-artists": "music_library_consistency.py",
     "library-consistency": "music_library_consistency.py",
     "audit-library-artists": "music_library_audit.py",
@@ -168,6 +170,7 @@ def guide(db_path: Path) -> int:
         " 15. music-library delete-queue  # report-only deletion queue audit\n"
         " 16. music-library cleanup-hadestown  # report-only artist cleanup\n"
         " 17. music-library cleanup-library-artists  # full-library report\n"
+        " 17b. music-library artist-credits  # report duplicate artist credit variants\n"
         " 18. music-library audit-library-artists  # detailed review queue\n"
         " 19. music-library phone-delete  # report phone-synced delete me pls queue\n"
         "\nStandalone MOV: music-library video URL --dry-run\n"
