@@ -522,6 +522,13 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             "ALTER TABLE tracks ADD COLUMN "
             "downloaded_duration_difference_seconds REAL"
         ),
+        # The embedded credits that confirm a licensed upload are not stored
+        # on the track, so the downloader cannot re-derive this and must be
+        # told what the matcher already established.
+        "youtube_licensed_topic": (
+            "ALTER TABLE tracks ADD COLUMN "
+            "youtube_licensed_topic INTEGER NOT NULL DEFAULT 0"
+        ),
     }
     for column, statement in migrations.items():
         if column not in existing_columns:

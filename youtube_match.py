@@ -303,7 +303,10 @@ def source_signals(
     # Cast recordings hit this constantly: Spotify credits one performer
     # while the channel is named for the release or a different cast member.
     licensed_topic = bool(
-        is_topic and provided_to_youtube and metadata_artist_match
+        # Already established when this match was recorded: the evidence lives
+        # on the hydrated candidate, which later stages no longer have.
+        candidate.get("licensed_topic")
+        or (is_topic and provided_to_youtube and metadata_artist_match)
     )
     return {
         "artist_confirmed": (
@@ -864,17 +867,18 @@ def save_candidates(
     )
     selected_reason = "Best non-rejected candidate; manual review required"
     selected_eligible = False
+    candidate = {
+        "title": best["youtube_title"],
+        "channel": best["youtube_channel"],
+        "duration": best["youtube_duration_seconds"],
+        "channel_is_verified": best["youtube_channel_verified"],
+        "description": best.get("metadata_description", ""),
+        "artist": best.get("metadata_artist", ""),
+        "track": best.get("metadata_track", ""),
+        "album": best.get("metadata_album", ""),
+    }
+    licensed_topic = source_signals(track, candidate)["licensed_topic"]
     if auto_approve is not None:
-        candidate = {
-            "title": best["youtube_title"],
-            "channel": best["youtube_channel"],
-            "duration": best["youtube_duration_seconds"],
-            "channel_is_verified": best["youtube_channel_verified"],
-            "description": best.get("metadata_description", ""),
-            "artist": best.get("metadata_artist", ""),
-            "track": best.get("metadata_track", ""),
-            "album": best.get("metadata_album", ""),
-        }
         eligible, reason = automatic_approval_eligible(
             track, candidate, best["score"], bool(best["hard_reject"]), auto_approve
         )
@@ -899,6 +903,7 @@ def save_candidates(
             youtube_title = ?,
             youtube_channel = ?,
             youtube_channel_verified = ?,
+            youtube_licensed_topic = ?,
             youtube_duration_seconds = ?,
             youtube_score = ?,
             youtube_score_notes = ?,
@@ -951,6 +956,7 @@ def save_candidates(
             best["youtube_title"],
             best["youtube_channel"],
             best["youtube_channel_verified"],
+            1 if licensed_topic else 0,
             best["youtube_duration_seconds"],
             best["score"],
             best["score_notes"],

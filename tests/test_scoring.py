@@ -7,6 +7,7 @@ from youtube_match import (
     candidate_record,
     candidate_score,
 )
+from download_mp3 import selected_candidate
 from apple_music_duplicates import metadata_key, normalize
 
 
@@ -120,6 +121,49 @@ class ApprovalEvidenceTests(unittest.TestCase):
         )
         self.assertTrue(eligible, reason)
         self.assertNotIn("not confirmed", reason)
+
+
+class DownloadGateInheritsMatchFindingTests(unittest.TestCase):
+    """The download gate re-checks approval from the stored track row.
+
+    That row keeps the channel and title but never the embedded credits, so a
+    licensed cast-album upload the matcher confirmed would be refused here for
+    "artist is not confirmed" -- approved by one stage and unreachable by the
+    next. The finding is persisted so both stages agree.
+    """
+
+    def track_row(self, licensed: int) -> dict:
+        return {
+            "title": "Valley of Ashes",
+            "primary_artist": "Paul Whitty",
+            "album": "The Great Gatsby - A New Musical",
+            "duration_ms": 180000,
+            "youtube_title": "Valley of Ashes",
+            "youtube_channel": "Release - Topic",
+            "youtube_duration_seconds": 180,
+            "youtube_channel_verified": 0,
+            "youtube_licensed_topic": licensed,
+        }
+
+    def test_a_persisted_finding_carries_the_track_through(self) -> None:
+        track = self.track_row(1)
+        eligible, reason = automatic_approval_eligible(
+            track, selected_candidate(track), 100.0, False, 95.0
+        )
+        self.assertTrue(eligible, reason)
+
+    def test_without_it_the_generic_channel_still_blocks(self) -> None:
+        track = self.track_row(0)
+        eligible, reason = automatic_approval_eligible(
+            track, selected_candidate(track), 100.0, False, 95.0
+        )
+        self.assertFalse(eligible)
+        self.assertIn("artist is not confirmed", reason)
+
+    def test_rows_predating_the_column_do_not_crash(self) -> None:
+        track = self.track_row(0)
+        del track["youtube_licensed_topic"]
+        self.assertFalse(selected_candidate(track)["licensed_topic"])
 
 
 class ScoringTests(unittest.TestCase):

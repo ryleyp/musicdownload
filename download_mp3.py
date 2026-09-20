@@ -283,6 +283,14 @@ def selected_candidate(track: Any) -> dict[str, Any]:
         "channel": track["youtube_channel"],
         "duration": track["youtube_duration_seconds"],
         "channel_is_verified": bool(track["youtube_channel_verified"]),
+        # Established at match time from the embedded credits, which are not
+        # stored here; without it this gate would reject licensed cast-album
+        # uploads that the matcher already confirmed and approved.
+        "licensed_topic": bool(
+            track["youtube_licensed_topic"]
+            if "youtube_licensed_topic" in track.keys()
+            else 0
+        ),
     }
 
 
