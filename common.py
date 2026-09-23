@@ -90,6 +90,13 @@ def ensure_data_dir(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
 
+# Bump whenever initialize_schema's tables, indexes or column migrations
+# change. Every statement it runs is idempotent, so the version is purely a
+# fast path: at the current version the whole body is skipped. Forgetting to
+# bump it means a new migration never runs, so treat it as part of the change.
+SCHEMA_VERSION = 1
+
+
 @contextmanager
 def connect_db(db_path: Path = DEFAULT_DB_PATH):
     ensure_data_dir(db_path)
@@ -110,6 +117,12 @@ def connect_db(db_path: Path = DEFAULT_DB_PATH):
 
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
+    # Roughly sixty DDL statements ran on every single connection -- every
+    # invocation of every script -- to re-assert a schema that was already
+    # correct. They are cheap individually but they are schema writes, and
+    # this database is opened many times per pipeline run.
+    if connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION:
+        return
     connection.executescript(
         """
         CREATE TABLE IF NOT EXISTS tracks (
@@ -569,6 +582,9 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             "ALTER TABLE youtube_candidates ADD COLUMN "
             "source_tier INTEGER NOT NULL DEFAULT 0"
         )
+    # Last, so a failure part way through leaves the version behind and the
+    # next open retries the whole idempotent body rather than skipping it.
+    connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
 def parse_release_year(release_date: str | None) -> int | None:
