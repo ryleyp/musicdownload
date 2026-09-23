@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download videos with yt-dlp and convert them to QuickTime-compatible MOV."""
+"""Download videos with yt-dlp at a chosen quality tier."""
 from __future__ import annotations
 
 import argparse
@@ -15,6 +15,12 @@ from common import AppError, PROJECT_DIR
 
 DEFAULT_OUTPUT = PROJECT_DIR / "videos"
 DEFAULT_ARCHIVE = PROJECT_DIR / "data" / "video_download_archive.txt"
+
+
+def resolve_defaults(args: argparse.Namespace) -> None:
+    """A height cap protects a small screen; it only costs quality elsewhere."""
+    if args.max_height is None:
+        args.max_height = 1080 if args.quality == "device" else 0
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -35,10 +41,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"Destination folder. Default: {DEFAULT_OUTPUT}",
     )
     parser.add_argument(
+        "--quality",
+        choices=("device", "compatible", "full"),
+        default="device",
+        help=(
+            "device: re-encode to H.264/AAC MOV, capped height, for QuickTime "
+            "and iPod sync. compatible: best H.264/AAC MP4 with no re-encode, "
+            "uncapped, plays natively on Apple devices. full: absolute best "
+            "streams with no re-encode, any codec, may need VLC. "
+            "Default: device."
+        ),
+    )
+    parser.add_argument(
         "--max-height",
         type=int,
-        default=1080,
-        help="Maximum video height. Use 0 for the best available. Default: 1080.",
+        default=None,
+        help=(
+            "Maximum video height; 0 means no limit. Defaults to 1080 for "
+            "--quality device and no limit for compatible and full."
+        ),
     )
     parser.add_argument(
         "--crf",
@@ -87,7 +108,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Print the yt-dlp commands without downloading or creating folders.",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    # Resolve here so every caller, tests included, gets a complete namespace.
+    resolve_defaults(args)
+    return args
 
 
 def validate_args(args: argparse.Namespace) -> None:
@@ -113,19 +137,23 @@ def check_dependencies() -> None:
         raise AppError("ffmpeg was not found. On a Mac, run: brew install ffmpeg")
 
 
-def format_selector(max_height: int) -> str:
+def format_selector(max_height: int, quality: str = "device") -> str:
     limit = f"[height<={max_height}]" if max_height else ""
+    if quality == "compatible":
+        # Apple devices decode H.264 video and AAC audio natively, so asking
+        # for those streams up front avoids re-encoding to get a playable file.
+        # Fall through to any streams rather than fail when none are offered.
+        return (
+            f"bv*[vcodec^=avc1]{limit}+ba[acodec^=mp4a]/"
+            f"b[ext=mp4]{limit}/"
+            f"bv*{limit}+ba/b{limit}/best{limit}"
+        )
     return f"bv*{limit}+ba/b{limit}/best{limit}"
 
 
 def yt_dlp_video_command(args: argparse.Namespace, url: str) -> list[str]:
     output_template = str(
         args.output / "%(title).180B [%(id)s].%(ext)s"
-    )
-    ffmpeg_output_args = (
-        f"-c:v libx264 -preset {args.preset} -crf {args.crf} "
-        f"-pix_fmt yuv420p -c:a aac -b:a {args.audio_bitrate}k "
-        "-movflags +faststart"
     )
     command = [
         "yt-dlp",
@@ -134,13 +162,29 @@ def yt_dlp_video_command(args: argparse.Namespace, url: str) -> list[str]:
         "--newline",
         "--embed-metadata",
         "-f",
-        format_selector(args.max_height),
-        "--recode-video",
-        "mov",
-        "--postprocessor-args",
-        f"VideoConvertor+ffmpeg_o:{ffmpeg_output_args}",
+        format_selector(args.max_height, args.quality),
+    ]
+    if args.quality == "device":
+        ffmpeg_output_args = (
+            f"-c:v libx264 -preset {args.preset} -crf {args.crf} "
+            f"-pix_fmt yuv420p -c:a aac -b:a {args.audio_bitrate}k "
+            "-movflags +faststart"
+        )
+        command += [
+            "--recode-video",
+            "mov",
+            "--postprocessor-args",
+            f"VideoConvertor+ffmpeg_o:{ffmpeg_output_args}",
+        ]
+    elif args.quality == "compatible":
+        # Streams are already H.264/AAC here, so this only rewraps them.
+        command += ["--merge-output-format", "mp4"]
+    # "full" names no container: yt-dlp keeps MP4 when the streams fit and
+    # falls back to MKV when they do not, which is the only way to hold
+    # arbitrary codecs without re-encoding and losing the quality asked for.
+    command += [
         "--print",
-        "after_move:Saved MOV: %(filepath)s",
+        "after_move:Saved video: %(filepath)s",
         "-o",
         output_template,
     ]
@@ -193,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        print(f"Video run complete. MOV files: {args.output}")
+        print(f"Video run complete ({args.quality} quality): {args.output}")
         return 0
     except (AppError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

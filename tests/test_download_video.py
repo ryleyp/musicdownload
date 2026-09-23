@@ -11,6 +11,54 @@ from unittest.mock import patch
 import download_video
 
 
+class QualityTierTests(unittest.TestCase):
+    """Only the device tier should ever re-encode.
+
+    Re-encoding is how the device tier earns a file an iPod can play, but it
+    is also a lossy step, so the tiers that exist to preserve quality must
+    rewrap the downloaded streams rather than run them through libx264 again.
+    """
+
+    def build(self, *extra: str) -> list[str]:
+        with tempfile.TemporaryDirectory() as directory:
+            args = download_video.parse_args(
+                ["https://youtube.test/watch?v=abc", "--output", directory, *extra]
+            )
+            return download_video.yt_dlp_video_command(args, args.urls[0])
+
+    def test_device_tier_re_encodes_and_caps_height(self) -> None:
+        command = self.build()
+        self.assertIn("--recode-video", command)
+        self.assertIn("mov", command)
+        self.assertIn("libx264", " ".join(command))
+        self.assertIn("height<=1080", " ".join(command))
+
+    def test_compatible_tier_rewraps_without_re_encoding(self) -> None:
+        command = self.build("--quality", "compatible")
+        self.assertNotIn("--recode-video", command)
+        self.assertNotIn("libx264", " ".join(command))
+        self.assertIn("--merge-output-format", command)
+        self.assertIn("mp4", command)
+        # Asks for Apple-native codecs so the rewrap yields a playable file.
+        self.assertIn("vcodec^=avc1", " ".join(command))
+
+    def test_full_tier_re_encodes_nothing_and_forces_no_container(self) -> None:
+        command = self.build("--quality", "full")
+        self.assertNotIn("--recode-video", command)
+        self.assertNotIn("libx264", " ".join(command))
+        # yt-dlp must stay free to pick MKV when the best streams need it.
+        self.assertNotIn("--merge-output-format", command)
+
+    def test_quality_tiers_lift_the_height_cap(self) -> None:
+        for tier in ("compatible", "full"):
+            with self.subTest(tier=tier):
+                self.assertNotIn("height<=", " ".join(self.build("--quality", tier)))
+
+    def test_an_explicit_cap_still_wins(self) -> None:
+        command = self.build("--quality", "full", "--max-height", "720")
+        self.assertIn("height<=720", " ".join(command))
+
+
 class VideoDownloadTests(unittest.TestCase):
     def test_default_command_outputs_quicktime_compatible_mov(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
